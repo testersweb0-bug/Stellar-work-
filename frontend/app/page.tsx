@@ -5,15 +5,12 @@ import LoadingState from "@/components/LoadingState";
 import EmptyState from "@/components/EmptyState";
 import SectionCard from "@/components/SectionCard";
 import { acceptJob, getJob, getJobCount } from "@/lib/contract";
+import { toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import type { Job } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-
-function toXlm(stroops: string) {
-  return (Number(stroops) / 10_000_000).toFixed(2);
-}
 
 export default function HomePage() {
   const { wallet } = useWallet();
@@ -211,7 +208,12 @@ export default function HomePage() {
               <Link href={`/job/${id}`} className="block">
                 <h2 className="text-lg font-medium hover:underline">Job #{id}</h2>
               </Link>
-              <p className="mt-2 text-sm font-bold text-slate-700">{toXlm(job.amount)} XLM</p>
+              <p className="mt-2 flex items-baseline gap-1 text-sm font-bold text-slate-700">
+                <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+                  {toXlm(job.amount)}
+                </span>
+                <span className="shrink-0">XLM</span>
+              </p>
               <p className="mt-1 line-clamp-2 text-sm text-slate-700">
                 {getDescription(job.description_hash)}
               </p>

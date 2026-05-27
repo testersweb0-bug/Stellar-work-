@@ -18,4 +18,10 @@ describe("toXlm", () => {
     expect(toXlm(10050000)).toBe("1.01");
     expect(toXlm(10049999)).toBe("1.00");
   });
+
+  it("formats very large amounts without scientific notation", () => {
+    const formatted = toXlm("1000000000000000000000");
+    expect(/[eE][+-]?\d+/.test(formatted)).toBe(false);
+    expect(/\d{2}$/.test(formatted)).toBe(true);
+  });
 });

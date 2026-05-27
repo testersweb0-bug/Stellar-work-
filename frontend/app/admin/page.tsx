@@ -10,6 +10,7 @@ import {
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
 import SectionCard from "@/components/SectionCard";
+import { toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
@@ -31,10 +32,6 @@ const STATUS_COLORS: Record<JobStatus, string> = {
   Cancelled: "bg-red-100 text-red-800",
   Disputed: "bg-orange-100 text-orange-800",
 };
-
-function toXlm(stroops: number) {
-  return (stroops / 10_000_000).toFixed(7);
-}
 
 export default function AdminPage() {
   const { wallet, connectWallet } = useWallet();
@@ -175,7 +172,12 @@ export default function AdminPage() {
       )}
 
       <SectionCard title="Platform Fees">
-        <p className="mt-2 text-3xl font-bold">{toXlm(fees)} XLM</p>
+        <p className="mt-2 flex items-baseline gap-2 text-3xl font-bold">
+          <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+            {toXlm(fees)}
+          </span>
+          <span className="shrink-0 text-base font-semibold">XLM</span>
+        </p>
         <p className="text-sm text-slate-500">Accrued platform fees (2.5%)</p>
         <button
           disabled={withdrawing || fees <= 0}
@@ -215,18 +217,18 @@ export default function AdminPage() {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs text-slate-500">
-                  <th className="pb-2 pr-4">ID</th>
-                  <th className="pb-2 pr-4">Status</th>
-                  <th className="pb-2 pr-4">Client</th>
-                  <th className="pb-2 pr-4">Freelancer</th>
-                  <th className="pb-2 pr-4 text-right">Amount</th>
-                  <th className="pb-2 pr-4">Deadline</th>
+                  <th scope="col" className="pb-2 pr-4">ID</th>
+                  <th scope="col" className="pb-2 pr-4">Status</th>
+                  <th scope="col" className="pb-2 pr-4">Client</th>
+                  <th scope="col" className="pb-2 pr-4">Freelancer</th>
+                  <th scope="col" className="pb-2 pr-4 text-right">Amount</th>
+                  <th scope="col" className="pb-2 pr-4">Deadline</th>
                 </tr>
               </thead>
               <tbody>
                 {jobs.map(({ id, job }) => (
                   <tr key={id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4 font-medium">#{id}</td>
+                    <th scope="row" className="py-2 pr-4 font-medium">#{id}</th>
                     <td className="py-2 pr-4">
                       <span
                         className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[job.status]}`}
@@ -241,7 +243,12 @@ export default function AdminPage() {
                       {job.freelancer ? `${job.freelancer.slice(0, 8)}...` : "-"}
                     </td>
                     <td className="py-2 pr-4 text-right">
-                      {(Number(job.amount) / 10_000_000).toFixed(2)} XLM
+                      <span className="inline-flex items-baseline justify-end gap-1">
+                        <span className="max-w-[10rem] overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+                          {toXlm(job.amount)}
+                        </span>
+                        <span className="shrink-0">XLM</span>
+                      </span>
                     </td>
                     <td className="py-2 pr-4 text-xs">
                       {job.deadline === "0"

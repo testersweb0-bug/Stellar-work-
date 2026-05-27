@@ -832,6 +832,37 @@ mod test {
     }
 
     #[test]
+    fn job_count_increments_once_per_post_sequentially() {
+        let (env, client, _, user, _, native_token) = setup();
+        assert_eq!(client.get_job_count(), 0);
+
+        let first = client.post_job(&user, &1_000_000i128, &hash(&env), &0u64, &native_token);
+        assert_eq!(first, 1);
+        assert_eq!(client.get_job_count(), 1);
+
+        let second = client.post_job(&user, &2_000_000i128, &hash(&env), &0u64, &native_token);
+        assert_eq!(second, 2);
+        assert_eq!(client.get_job_count(), 2);
+
+        let third = client.post_job(&user, &3_000_000i128, &hash(&env), &0u64, &native_token);
+        assert_eq!(third, 3);
+        assert_eq!(client.get_job_count(), 3);
+    }
+
+    #[test]
+    fn cancel_does_not_decrement_job_count() {
+        let (env, client, _, user, _, native_token) = setup();
+        let first = client.post_job(&user, &1_000_000i128, &hash(&env), &0u64, &native_token);
+        let second = client.post_job(&user, &2_000_000i128, &hash(&env), &0u64, &native_token);
+        assert_eq!(client.get_job_count(), 2);
+
+        client.cancel_job(&user, &first);
+        assert_eq!(client.get_job_count(), 2);
+        assert_eq!(client.get_job(&first).status, JobStatus::Cancelled);
+        assert_eq!(client.get_job(&second).status, JobStatus::Open);
+    }
+
+    #[test]
     fn accept_and_approve_happy_path() {
         let (env, client, _, user, freelancer, native_token) = setup();
         let job_id = client.post_job(&user, &1_000_000i128, &hash(&env), &0u64, &native_token);

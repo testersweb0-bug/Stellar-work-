@@ -39,13 +39,16 @@ export function Navigation() {
 
   return (
     <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-        <Link href="/" className="text-lg font-semibold">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4">
+        <Link href="/" className="shrink-0 text-lg font-semibold">
           StellarWork
         </Link>
 
-        <div className="hidden items-center gap-6 md:flex">
-          <nav aria-label="Main navigation" className="flex items-center gap-4 text-sm">
+        <div className="hidden min-w-0 items-center gap-4 lg:gap-6 md:flex">
+          <nav
+            aria-label="Main navigation"
+            className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm"
+          >
              {links.map(({ href, label }) => (
               <Link
                 key={href}
@@ -95,15 +98,15 @@ export function Navigation() {
 
       {menuOpen && (
         <div className="border-t border-slate-200 px-4 py-3 md:hidden">
-          <nav aria-label="Main navigation" className="flex flex-col gap-3 text-sm">
+          <nav aria-label="Main navigation" className="grid grid-cols-2 gap-3 text-sm">
              {links.map(({ href, label }) => (
               <Link
                 key={href}
                 href={href}
                 className={
                   isActive(href)
-                    ? "font-semibold text-slate-900"
-                    : "text-slate-600 hover:text-slate-900"
+                    ? "rounded-md bg-slate-100 px-2 py-1 font-semibold text-slate-900"
+                    : "rounded-md px-2 py-1 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }
                 onClick={() => setMenuOpen(false)}
               >

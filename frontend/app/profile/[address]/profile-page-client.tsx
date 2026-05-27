@@ -2,6 +2,7 @@
 
 import ErrorBanner from "@/components/ErrorBanner";
 import { getJob, getJobCount } from "@/lib/contract";
+import { toXlm } from "@/lib/format";
 import type { Job, JobStatus } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
@@ -27,10 +28,6 @@ const STATUS_COLORS: Record<JobStatus, string> = {
 
 function isValidStellarAddress(address: string): boolean {
   return /^G[A-Z2-7]{55}$/.test(address);
-}
-
-function toXlm(stroops: number) {
-  return (stroops / 10_000_000).toFixed(2);
 }
 
 interface ProfileJob {
@@ -150,11 +147,21 @@ export default function ProfilePageClient({ address }: { address: string }) {
               <p className="text-xs text-slate-500">Jobs Completed</p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
-              <p className="text-2xl font-bold">{toXlm(totalEarnedStroops)}</p>
+              <p className="flex items-baseline justify-center gap-1 text-2xl font-bold">
+                <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+                  {toXlm(totalEarnedStroops)}
+                </span>
+                <span className="shrink-0 text-xs font-semibold">XLM</span>
+              </p>
               <p className="text-xs text-slate-500">XLM Earned</p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-center">
-              <p className="text-2xl font-bold">{toXlm(totalSpentStroops)}</p>
+              <p className="flex items-baseline justify-center gap-1 text-2xl font-bold">
+                <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+                  {toXlm(totalSpentStroops)}
+                </span>
+                <span className="shrink-0 text-xs font-semibold">XLM</span>
+              </p>
               <p className="text-xs text-slate-500">XLM Spent</p>
             </div>
           </div>
@@ -170,21 +177,21 @@ export default function ProfilePageClient({ address }: { address: string }) {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-xs text-slate-500">
-                      <th className="pb-2 pr-4">ID</th>
-                      <th className="pb-2 pr-4">Role</th>
-                      <th className="pb-2 pr-4">Status</th>
-                      <th className="pb-2 pr-4 text-right">Amount</th>
-                      <th className="pb-2 pr-4">Date</th>
+                      <th scope="col" className="pb-2 pr-4">ID</th>
+                      <th scope="col" className="pb-2 pr-4">Role</th>
+                      <th scope="col" className="pb-2 pr-4">Status</th>
+                      <th scope="col" className="pb-2 pr-4 text-right">Amount</th>
+                      <th scope="col" className="pb-2 pr-4">Date</th>
                     </tr>
                   </thead>
                   <tbody>
                     {jobs.map(({ id, job, role }) => (
                       <tr key={`${id}-${role}`} className="border-b border-slate-100">
-                        <td className="py-2 pr-4">
+                        <th scope="row" className="py-2 pr-4">
                           <Link href={`/job/${id}`} className="font-medium hover:underline">
                             #{id}
                           </Link>
-                        </td>
+                        </th>
                         <td className="py-2 pr-4 capitalize">{role}</td>
                         <td className="py-2 pr-4">
                           <span
@@ -194,7 +201,12 @@ export default function ProfilePageClient({ address }: { address: string }) {
                           </span>
                         </td>
                         <td className="py-2 pr-4 text-right">
-                          {toXlm(Number(job.amount))} XLM
+                          <span className="inline-flex items-baseline justify-end gap-1">
+                            <span className="max-w-[10rem] overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+                              {toXlm(job.amount)}
+                            </span>
+                            <span className="shrink-0">XLM</span>
+                          </span>
                         </td>
                         <td className="py-2 pr-4 text-xs">
                           {new Date(Number(job.created_at) * 1000).toLocaleDateString()}

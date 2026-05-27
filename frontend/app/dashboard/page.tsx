@@ -11,6 +11,7 @@ import {
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
 import SectionCard from "@/components/SectionCard";
+import { toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
@@ -40,10 +41,6 @@ const STATUS_COLORS: Record<JobStatus, string> = {
   Cancelled: "bg-red-100 text-red-800",
   Disputed: "bg-orange-100 text-orange-800",
 };
-
-function toXlm(stroops: string) {
-  return (Number(stroops) / 10_000_000).toFixed(2);
-}
 
 function formatDeadline(deadline: string) {
   if (deadline === "0") return "No deadline";
@@ -256,7 +253,12 @@ function JobCard({
         </span>
       </div>
       <div className="mt-2 space-y-1 text-sm text-slate-600">
-        <p>{toXlm(job.amount)} XLM</p>
+        <p className="flex items-baseline gap-1">
+          <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
+            {toXlm(job.amount)}
+          </span>
+          <span className="shrink-0">XLM</span>
+        </p>
         <p>Deadline: {formatDeadline(job.deadline)}</p>
         {role === "client" && job.freelancer && (
           <p className="truncate">Freelancer: {job.freelancer}</p>
