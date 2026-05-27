@@ -4,7 +4,7 @@ import { postJob } from "@/lib/contract";
 import ErrorBanner from "@/components/ErrorBanner";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
@@ -27,7 +27,11 @@ export default function PostJobPage() {
   const [lastAnnouncedSuccess, setLastAnnouncedSuccess] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [amountValidationError, setAmountValidationError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    amount?: string;
+    description?: string;
+    tokenAddress?: string;
+  }>({});
 
   const parseAmountToStroops = (value: string): string | null => {
     const trimmed = value.trim();
@@ -59,7 +63,7 @@ export default function PostJobPage() {
           setError(null);
           setSuccess(null);
           setTxHash(null);
-          setAmountValidationError(null);
+          setFieldErrors({});
 
           if (!wallet) {
             try {
@@ -72,11 +76,23 @@ export default function PostJobPage() {
 
           setSubmitting(true);
           try {
+            const nextFieldErrors: {
+              amount?: string;
+              description?: string;
+              tokenAddress?: string;
+            } = {};
             const amountStroops = parseAmountToStroops(amount);
             if (!amountStroops || BigInt(amountStroops) <= 0n) {
-              setAmountValidationError(
-                "Enter a valid amount with up to 7 decimal places.",
-              );
+              nextFieldErrors.amount = "Enter a valid amount with up to 7 decimal places.";
+            }
+            if (!description.trim()) {
+              nextFieldErrors.description = "Job description cannot be empty.";
+            }
+            if (!tokenAddress.trim()) {
+              nextFieldErrors.tokenAddress = "Token address is required.";
+            }
+            if (Object.keys(nextFieldErrors).length > 0) {
+              setFieldErrors(nextFieldErrors);
               return;
             }
             const hashHex = await sha256Hex(description);
@@ -112,6 +128,23 @@ export default function PostJobPage() {
           }
         }}
       >
+        {(fieldErrors.amount || fieldErrors.description || fieldErrors.tokenAddress) && (
+          <div
+            id="post-job-errors"
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+            className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
+            <p className="font-medium">Please correct the highlighted fields:</p>
+            <ul className="mt-2 list-disc pl-5">
+              {fieldErrors.amount && <li>{fieldErrors.amount}</li>}
+              {fieldErrors.description && <li>{fieldErrors.description}</li>}
+              {fieldErrors.tokenAddress && <li>{fieldErrors.tokenAddress}</li>}
+            </ul>
+          </div>
+        )}
+
         <label className="block text-sm font-medium">
           Amount (XLM)
           <input
@@ -120,11 +153,18 @@ export default function PostJobPage() {
             min="0"
             step="0.0000001"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => {
+              setAmount(e.target.value);
+              setFieldErrors((current) => ({ ...current, amount: undefined }));
+            }}
+            aria-invalid={Boolean(fieldErrors.amount)}
+            aria-describedby={fieldErrors.amount ? "post-job-amount-error" : undefined}
             required
           />
-          {amountValidationError && (
-            <p className="mt-1 text-xs text-red-600">{amountValidationError}</p>
+          {fieldErrors.amount && (
+            <p id="post-job-amount-error" className="mt-1 text-xs text-red-600">
+              {fieldErrors.amount}
+            </p>
           )}
         </label>
 
@@ -133,9 +173,21 @@ export default function PostJobPage() {
           <textarea
             className="mt-1 min-h-36 w-full rounded-md border border-slate-300 px-3 py-2"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              setFieldErrors((current) => ({ ...current, description: undefined }));
+            }}
+            aria-invalid={Boolean(fieldErrors.description)}
+            aria-describedby={
+              fieldErrors.description ? "post-job-description-error" : undefined
+            }
             required
           />
+          {fieldErrors.description && (
+            <p id="post-job-description-error" className="mt-1 text-xs text-red-600">
+              {fieldErrors.description}
+            </p>
+          )}
         </label>
 
         <label className="block text-sm font-medium">
@@ -154,14 +206,26 @@ export default function PostJobPage() {
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
             type="text"
             value={tokenAddress}
-            onChange={(e) => setTokenAddress(e.target.value)}
+            onChange={(e) => {
+              setTokenAddress(e.target.value);
+              setFieldErrors((current) => ({ ...current, tokenAddress: undefined }));
+            }}
+            aria-invalid={Boolean(fieldErrors.tokenAddress)}
+            aria-describedby={
+              fieldErrors.tokenAddress ? "post-job-token-address-error" : undefined
+            }
             required
           />
+          {fieldErrors.tokenAddress && (
+            <p id="post-job-token-address-error" className="mt-1 text-xs text-red-600">
+              {fieldErrors.tokenAddress}
+            </p>
+          )}
         </label>
 
         <button
           type="submit"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={submitting}
           aria-busy={submitting}
         >

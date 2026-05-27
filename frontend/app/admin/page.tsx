@@ -179,7 +179,7 @@ export default function AdminPage() {
         <p className="text-sm text-slate-500">Accrued platform fees (2.5%)</p>
         <button
           disabled={withdrawing || fees <= 0}
-          className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
           onClick={handleWithdraw}
         >
           {withdrawing ? "Withdrawing..." : "Withdraw Fees"}

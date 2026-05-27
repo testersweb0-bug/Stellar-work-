@@ -141,7 +141,7 @@ export default function HomePage() {
         <button
           type="button"
           onClick={() => void refresh()}
-          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           disabled={loading}
         >
           {loading ? "Refreshing..." : "Refresh"}
@@ -301,7 +301,7 @@ export default function HomePage() {
               type="button"
               onClick={() => setPage((prev) => Math.max(1, prev - 1))}
               disabled={loading || page <= 1}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Previous
             </button>
@@ -312,7 +312,7 @@ export default function HomePage() {
               type="button"
               onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
               disabled={loading || page >= totalPages}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Next
             </button>
