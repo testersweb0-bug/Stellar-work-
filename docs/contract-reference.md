@@ -65,3 +65,10 @@ This document provides a quick reference for the `EscrowContract` methods, expec
 | `withdraw_fees` | `token: Address` | Transfers accrued fees to the admin (requires admin auth). |
 | `add_allowed_token`| `token: Address` | Whitelists a token for use in jobs (requires admin auth). |
 | `is_token_allowed` | `token: Address` | Returns whether a token is whitelisted. |
+
+### `get_admin` Return Format
+
+- **Method:** `get_admin()`
+- **Return type:** `Address` (Soroban address string)
+- **Format:** a StrKey-encoded Stellar address string, typically beginning with `G...`
+- **Example response:** `GCFX3A7V7D2ZQ3WQKQ6H5E6M7N8P9R0S1T2U3V4W5X6Y7Z8A9B0C`

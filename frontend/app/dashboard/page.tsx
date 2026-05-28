@@ -14,7 +14,7 @@ import SectionCard from "@/components/SectionCard";
 import { toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, type KeyboardEvent } from "react";
 
 const STATUS_OPTIONS: JobStatus[] = [
   "Open",
@@ -54,6 +54,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const filterOptions: Array<JobStatus | "All"> = ["All", ...STATUS_OPTIONS];
+  const filterButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const fetchJobs = useCallback(async () => {
     if (!wallet) return;
@@ -109,6 +111,22 @@ export default function DashboardPage() {
   const filteredPosted = filterJobs(postedJobs);
   const filteredAccepted = filterJobs(acceptedJobs);
 
+  const handleFilterKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
+      return;
+    }
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex =
+      (index + delta + filterOptions.length) % filterOptions.length;
+    const nextFilter = filterOptions[nextIndex];
+    setStatusFilter(nextFilter);
+    filterButtonRefs.current[nextIndex]?.focus();
+  };
+
   if (!wallet) {
     return (
       <section className="mx-auto max-w-3xl space-y-6">
@@ -132,20 +150,26 @@ export default function DashboardPage() {
     <section className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          className={`rounded-full px-3 py-1 text-sm ${statusFilter === "All" ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
-          onClick={() => setStatusFilter("All")}
-        >
-          All
-        </button>
-        {STATUS_OPTIONS.map((s) => (
+      <div
+        className="flex flex-wrap gap-2"
+        role="toolbar"
+        aria-label="Filter jobs by status"
+      >
+        {filterOptions.map((s, index) => (
           <button
             key={s}
+            ref={(element) => {
+              filterButtonRefs.current[index] = element;
+            }}
             className={`rounded-full px-3 py-1 text-sm ${statusFilter === s ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700"}`}
             onClick={() => setStatusFilter(s)}
+            onKeyDown={(event) => handleFilterKeyDown(event, index)}
+            aria-pressed={statusFilter === s}
+            aria-label={`${s === "All" ? "All statuses" : STATUS_LABELS[s]} filter, ${
+              statusFilter === s ? "selected" : "not selected"
+            }`}
           >
-            {STATUS_LABELS[s]}
+            {s === "All" ? "All" : STATUS_LABELS[s]}
           </button>
         ))}
       </div>

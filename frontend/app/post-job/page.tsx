@@ -30,6 +30,7 @@ export default function PostJobPage() {
   const [fieldErrors, setFieldErrors] = useState<{
     amount?: string;
     description?: string;
+    deadline?: string;
     tokenAddress?: string;
   }>({});
 
@@ -79,6 +80,7 @@ export default function PostJobPage() {
             const nextFieldErrors: {
               amount?: string;
               description?: string;
+              deadline?: string;
               tokenAddress?: string;
             } = {};
             const amountStroops = parseAmountToStroops(amount);
@@ -87,6 +89,19 @@ export default function PostJobPage() {
             }
             if (!description.trim()) {
               nextFieldErrors.description = "Job description cannot be empty.";
+            }
+            if (deadline) {
+              const today = new Date();
+              const todayIsoDate = new Date(
+                today.getFullYear(),
+                today.getMonth(),
+                today.getDate(),
+              )
+                .toISOString()
+                .slice(0, 10);
+              if (deadline < todayIsoDate) {
+                nextFieldErrors.deadline = "Deadline cannot be in the past.";
+              }
             }
             if (!tokenAddress.trim()) {
               nextFieldErrors.tokenAddress = "Token address is required.";
@@ -128,7 +143,10 @@ export default function PostJobPage() {
           }
         }}
       >
-        {(fieldErrors.amount || fieldErrors.description || fieldErrors.tokenAddress) && (
+        {(fieldErrors.amount ||
+          fieldErrors.description ||
+          fieldErrors.deadline ||
+          fieldErrors.tokenAddress) && (
           <div
             id="post-job-errors"
             role="alert"
@@ -140,6 +158,7 @@ export default function PostJobPage() {
             <ul className="mt-2 list-disc pl-5">
               {fieldErrors.amount && <li>{fieldErrors.amount}</li>}
               {fieldErrors.description && <li>{fieldErrors.description}</li>}
+              {fieldErrors.deadline && <li>{fieldErrors.deadline}</li>}
               {fieldErrors.tokenAddress && <li>{fieldErrors.tokenAddress}</li>}
             </ul>
           </div>
@@ -196,8 +215,18 @@ export default function PostJobPage() {
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
             type="date"
             value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
+            onChange={(e) => {
+              setDeadline(e.target.value);
+              setFieldErrors((current) => ({ ...current, deadline: undefined }));
+            }}
+            aria-invalid={Boolean(fieldErrors.deadline)}
+            aria-describedby={fieldErrors.deadline ? "post-job-deadline-error" : undefined}
           />
+          {fieldErrors.deadline && (
+            <p id="post-job-deadline-error" className="mt-1 text-xs text-red-600">
+              {fieldErrors.deadline}
+            </p>
+          )}
         </label>
 
         <label className="block text-sm font-medium">

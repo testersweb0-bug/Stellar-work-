@@ -88,6 +88,7 @@ pub enum Error {
     InvalidAmount = 11,
     InvalidDescriptionHash = 12,
     UnauthorizedAdmin = 13,
+    InvalidDeadline = 14,
 }
 
 #[contract]
@@ -134,7 +135,7 @@ impl EscrowContract {
         }
         client.require_auth();
         if deadline != 0 && e.ledger().timestamp() > deadline {
-            panic_with_error!(&e, Error::DeadlinePassed);
+            panic_with_error!(&e, Error::InvalidDeadline);
         }
         if !e
             .storage()
@@ -1515,7 +1516,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #6)")]
+    #[should_panic(expected = "Error(Contract, #14)")]
     fn post_job_with_past_deadline_fails() {
         let (env, client, _, user, _, native_token) = setup();
         let past_deadline = 1_710_000_000 - 3600;
