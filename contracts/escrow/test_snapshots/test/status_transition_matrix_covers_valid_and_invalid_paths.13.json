@@ -117,6 +117,9 @@
                   "bytes": "0707070707070707070707070707070707070707070707070707070707070707"
                 },
                 {
+                  "u32": 32
+                },
+                {
                   "u64": 0
                 },
                 {
@@ -206,9 +209,6 @@
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "function_name": "resolve_dispute",
               "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
                 {
                   "u64": 1
                 },
@@ -555,6 +555,18 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "DescriptionPayloadMaxBytes"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 4096
                         }
                       },
                       {
@@ -1650,6 +1662,9 @@
                   "bytes": "0707070707070707070707070707070707070707070707070707070707070707"
                 },
                 {
+                  "u32": 32
+                },
+                {
                   "u64": 0
                 },
                 {
@@ -1995,9 +2010,6 @@
             ],
             "data": {
               "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
                 {
                   "u64": 1
                 },

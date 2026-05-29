@@ -13,6 +13,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const BOOKMARK_STORAGE_KEY = "stellarwork:bookmarked-jobs";
+const VIEW_MODE_STORAGE_KEY = "stellarwork:jobs-view-mode";
+
+type JobsViewMode = "grid" | "list";
+
+function readViewMode(): JobsViewMode {
+  if (typeof window === "undefined") return "grid";
+  const stored = sessionStorage.getItem(VIEW_MODE_STORAGE_KEY);
+  return stored === "list" ? "list" : "grid";
+}
 
 export default function HomePage() {
   const { wallet } = useWallet();
@@ -29,6 +38,15 @@ export default function HomePage() {
   const [bookmarkedIds, setBookmarkedIds] = useState<number[]>([]);
   const [resultsAnnouncement, setResultsAnnouncement] = useState("");
   const [lastAnnouncedSignature, setLastAnnouncedSignature] = useState("");
+  const [viewMode, setViewMode] = useState<JobsViewMode>("grid");
+
+  useEffect(() => {
+    setViewMode(readViewMode());
+  }, []);
+
+  useEffect(() => {
+    sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+  }, [viewMode]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(totalJobs / pageSize)),
@@ -261,16 +279,58 @@ export default function HomePage() {
               Favorites only
             </label>
           </div>
+          <div
+            className="flex flex-wrap items-center gap-2 text-sm text-slate-600"
+            role="group"
+            aria-label="Jobs layout"
+          >
+            <span className="font-medium text-slate-700">Layout:</span>
+            <button
+              type="button"
+              className={`rounded-md border px-3 py-1 font-medium ${
+                viewMode === "grid"
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              aria-pressed={viewMode === "grid"}
+              onClick={() => setViewMode("grid")}
+            >
+              Grid
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border px-3 py-1 font-medium ${
+                viewMode === "list"
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              aria-pressed={viewMode === "list"}
+              onClick={() => setViewMode("list")}
+            >
+              List
+            </button>
+          </div>
         </fieldset>
       </SectionCard>
 
       <ul
-        className="grid list-none gap-4 md:grid-cols-2"
+        className={
+          viewMode === "grid"
+            ? "grid list-none gap-4 md:grid-cols-2"
+            : "flex list-none flex-col gap-4"
+        }
         aria-label="Open jobs"
       >
         {visibleJobs.map(({ id, job }) => (
           <li key={id}>
-            <article className="h-full rounded-lg border border-slate-200 bg-white p-4 transition-shadow hover:shadow-md">
+            <article
+              className={`interactive-card h-full p-4 ${
+                viewMode === "list"
+                  ? "flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+                  : ""
+              }`}
+            >
+              <div className={viewMode === "list" ? "min-w-0 flex-1" : undefined}>
               <Link href={`/job/${id}`} className="block">
                 <h2 className="text-lg font-medium hover:underline">Job #{id}</h2>
               </Link>
@@ -289,7 +349,8 @@ export default function HomePage() {
               <p className="mt-1 text-xs text-slate-600">
                 Deadline: {job.deadline === "0" ? "No deadline" : new Date(Number(job.deadline) * 1000).toLocaleString()}
               </p>
-              <div className="mt-4 flex items-center gap-2">
+              </div>
+              <div className={`flex flex-wrap items-center gap-2 ${viewMode === "list" ? "sm:shrink-0 sm:flex-col sm:items-stretch" : "mt-4"}`}>
                 <Link
                   href={`/job/${id}`}
                   className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

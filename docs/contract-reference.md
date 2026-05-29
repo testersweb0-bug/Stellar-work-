@@ -7,7 +7,7 @@ This document provides a quick reference for the `EscrowContract` methods, expec
 | Function | Parameters | Preconditions | Description |
 |----------|------------|---------------|-------------|
 | `initialize` | `admin: Address`, `native_token: Address` | Not already initialized | Sets the contract admin and native token. |
-| `post_job` | `client: Address`, `amount: i128`, `desc_hash: BytesN<32>`, `deadline: u64`, `token: Address` | `amount > 0`, `desc_hash != 0`, `deadline` in future (or 0), `token` allowed | Client deposits funds and creates a new job. |
+| `post_job` | `client: Address`, `amount: i128`, `desc_hash: BytesN<32>`, `description_payload_len: u32`, `deadline: u64`, `token: Address` | `amount > 0`, `desc_hash != 0`, `description_payload_len` within configured max, `deadline` in future (or 0), `token` allowed | Client deposits funds and creates a new job. |
 | `accept_job` | `freelancer: Address`, `job_id: u64` | Job status is `Open`, `freelancer != client`, `deadline` not passed | Freelancer claims the job. Status becomes `InProgress`. |
 | `submit_work` | `freelancer: Address`, `job_id: u64` | Job status is `InProgress`, caller is assigned freelancer | Freelancer submits work for review. Status becomes `SubmittedForReview`. |
 | `approve_work` | `client: Address`, `job_id: u64` | Job status is `SubmittedForReview`, caller is client | Client approves work. Funds (minus fee) are released to freelancer. Status becomes `Completed`. |
@@ -58,6 +58,9 @@ This document provides a quick reference for the `EscrowContract` methods, expec
 | `get_jobs_batch` | `start: u64`, `limit: u32` | Returns a list of jobs starting from `start` up to `limit`. |
 | `get_job_count` | - | Returns the total number of jobs created. |
 | `get_open_jobs_count`| - | Returns the count of jobs currently in `Open` status. |
+| `get_completed_jobs_count`| - | Returns the count of jobs in `Completed` status. |
+| `get_desc_payload_max`| - | Returns the maximum allowed description payload byte length. |
+| `set_desc_payload_max`| `caller: Address`, `max_bytes: u32` | Admin-only. Updates the description payload byte limit. |
 | `get_admin` | - | Returns the current contract admin address. |
 | `transfer_admin` | `caller: Address`, `new_admin: Address` | Updates the admin address (requires current admin auth). |
 | `get_fee_bps` | - | Returns the current platform fee in basis points (default: 250 = 2.5%). |

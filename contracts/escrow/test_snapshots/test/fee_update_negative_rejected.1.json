@@ -252,6 +252,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "DescriptionPayloadMaxBytes"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 4096
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "FeeBps"
                             }
                           ]

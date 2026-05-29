@@ -30,6 +30,7 @@ export async function postJob(
   client: string,
   amount: string,
   descHashHex: string,
+  descriptionPayloadLen: number,
   deadline: string,
   tokenAddress: string,
 ) {
@@ -37,9 +38,30 @@ export async function postJob(
     nativeToScVal(client, { type: "address" }),
     nativeToScVal(amount, { type: "i128" }),
     nativeToScVal(hexToBytes(descHashHex), { type: "bytes" }),
+    nativeToScVal(descriptionPayloadLen, { type: "u32" }),
     nativeToScVal(deadline, { type: "u64" }),
     nativeToScVal(tokenAddress, { type: "address" }),
   ]);
+}
+
+export async function getCompletedJobsCount(): Promise<number> {
+  const response = await callContract(
+    requireContractId(),
+    "get_completed_jobs_count",
+    [],
+    { readOnly: true },
+  );
+  return Number(response.data ?? 0);
+}
+
+export async function getDescPayloadMax(): Promise<number> {
+  const response = await callContract(
+    requireContractId(),
+    "get_desc_payload_max",
+    [],
+    { readOnly: true },
+  );
+  return Number(response.data ?? 0);
 }
 
 export async function acceptJob(freelancer: string, jobId: string) {

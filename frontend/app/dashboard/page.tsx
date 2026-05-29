@@ -5,6 +5,7 @@ import {
   cancelJob,
   getJob,
   getJobCount,
+  getCompletedJobsCount,
   submitWork,
   enforceDeadline,
 } from "@/lib/contract";
@@ -58,6 +59,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [pendingCancelJobId, setPendingCancelJobId] = useState<number | null>(null);
+  const [completedJobsCount, setCompletedJobsCount] = useState<number | null>(null);
   const filterOptions: Array<JobStatus | "All"> = ["All", ...STATUS_OPTIONS];
   const filterButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -75,6 +77,12 @@ export default function DashboardPage() {
         }
       }
       setAllJobs(fetched);
+      try {
+        const completed = await getCompletedJobsCount();
+        setCompletedJobsCount(completed);
+      } catch {
+        setCompletedJobsCount(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch jobs.");
     } finally {
@@ -87,6 +95,7 @@ export default function DashboardPage() {
       fetchJobs();
     } else {
       setAllJobs([]);
+      setCompletedJobsCount(null);
       setLoading(false);
       setError(null);
     }
@@ -173,6 +182,19 @@ export default function DashboardPage() {
   return (
     <section className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
+
+      <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+        <div className="interactive-card p-4">
+          <p className="text-2xl font-bold tabular-nums">
+            {completedJobsCount ?? "—"}
+          </p>
+          <p className="text-xs text-slate-500">Completed jobs (contract)</p>
+        </div>
+        <div className="interactive-card p-4">
+          <p className="text-2xl font-bold tabular-nums">{allJobs.length}</p>
+          <p className="text-xs text-slate-500">Your jobs on record</p>
+        </div>
+      </div>
 
       <div
         className="flex flex-wrap gap-2"
@@ -309,7 +331,7 @@ function JobCard({
   const actions = getActions(id, job, wallet, role);
 
   return (
-    <article className="h-full rounded-lg border border-slate-200 bg-white p-4">
+    <article className="interactive-card h-full p-4">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-medium">Job #{id}</h3>
         <span

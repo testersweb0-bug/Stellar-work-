@@ -475,7 +475,7 @@ function DisputeCard({
   const canResolve = role === "admin" && (dispute.status === "Active" || dispute.status === "UnderReview" || dispute.status === "PendingEvidence");
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+    <div className="interactive-card overflow-hidden">
       {/* Card header */}
       <div className="flex items-start gap-4 px-5 py-4">
         <div className="flex-1 min-w-0">
