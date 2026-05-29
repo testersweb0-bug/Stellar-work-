@@ -32,6 +32,19 @@ html {
   }
 }
 
+@layer components {
+  .interactive-card {
+    @apply rounded-lg border border-slate-200 bg-white transition-[box-shadow,border-color] duration-200;
+    @apply hover:border-slate-300 hover:shadow-md;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .interactive-card {
+      @apply border-slate-700 bg-slate-900 hover:border-slate-600 hover:shadow-lg hover:shadow-black/25;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

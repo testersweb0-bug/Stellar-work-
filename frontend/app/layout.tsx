@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { WalletProvider } from "@/lib/wallet-context";
+import { ToastProvider } from "@/components/ToastProvider";
 import { Navigation } from "./navigation";
 import { ScrollRestorer } from "@/components/ScrollRestorer";
 import Link from "next/link";
@@ -33,6 +34,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
         <WalletProvider>
+          <ToastProvider>
           <a
             href="#main-content"
             className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-slate-900 focus:outline-none"
@@ -66,6 +68,7 @@ export default function RootLayout({
               </div>
             </div>
           </footer>
+          </ToastProvider>
         </WalletProvider>
       </body>
     </html>

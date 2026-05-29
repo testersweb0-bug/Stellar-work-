@@ -1,6 +1,8 @@
 "use client";
 
+import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
 import LoadingState from "@/components/LoadingState";
+import { useToast } from "@/components/ToastProvider";
 import { acceptJob, approveWork, cancelJob, getJob, submitWork } from "@/lib/contract";
 import { toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
@@ -14,11 +16,11 @@ export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { wallet } = useWallet();
+  const { showSuccess, showError } = useToast();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
-  const [lastAnnouncedSuccess, setLastAnnouncedSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [latestTxHash, setLatestTxHash] = useState<string | null>(null);
   const [invalidId, setInvalidId] = useState(false);
@@ -56,8 +58,8 @@ export default function JobDetailPage() {
   useEffect(() => {
     if (!wallet) {
       setError(null);
-      setStatusMsg(null);
       setLatestTxHash(null);
+      setShowCancelConfirm(false);
     }
   }, [wallet]);
 
@@ -75,12 +77,14 @@ export default function JobDetailPage() {
     return "Description unavailable (posted from another device)";
   }
 
-  async function handleAction(action: () => Promise<{ hash?: string }>) {
+  async function handleAction(
+    action: () => Promise<{ hash?: string }>,
+    successMessage = "Action completed successfully.",
+  ) {
     if (loading) return;
     setError(null);
-    setStatusMsg(null);
     if (!wallet) {
-      setError("Connect your wallet to run this action.");
+      showError("Connect your wallet to run this action.");
       return;
     }
 
@@ -92,16 +96,23 @@ export default function JobDetailPage() {
         setLatestTxHash(result.hash);
       }
       await load();
-      const nextSuccess = "Action completed successfully.";
-      setStatusMsg(nextSuccess);
-      if (nextSuccess !== lastAnnouncedSuccess) {
-        setLastAnnouncedSuccess(nextSuccess);
-      }
+      showSuccess(successMessage);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Transaction failed.");
+      const message = e instanceof Error ? e.message : "Transaction failed.";
+      setError(message);
+      showError(message);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleConfirmCancel() {
+    if (!wallet) {
+      showError("Connect your wallet to run this action.");
+      return;
+    }
+    await handleAction(() => cancelJob(wallet, id), "Job cancelled and funds refunded.");
+    setShowCancelConfirm(false);
   }
 
   async function copyToClipboard(text: string) {
@@ -163,16 +174,6 @@ export default function JobDetailPage() {
       {error && (
         <p role="alert" className="rounded-md bg-red-100 p-3 text-sm text-red-700">
           {error}
-        </p>
-      )}
-      {statusMsg && (
-        <p
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className="rounded-md bg-green-100 p-3 text-sm text-green-700"
-        >
-          {statusMsg}
         </p>
       )}
       {latestTxHash && (
@@ -277,15 +278,26 @@ export default function JobDetailPage() {
             {canCancel && (
               <button
                 className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48"
-                onClick={() => handleAction(() => cancelJob(wallet!, id))}
+                onClick={() => setShowCancelConfirm(true)}
                 disabled={loading}
-                aria-busy={loading}
+                aria-haspopup="dialog"
               >
-                <span className="block truncate">{loading ? "Processing..." : "Cancel Job"}</span>
+                <span className="block truncate">Cancel Job</span>
               </button>
             )}
           </div>
         </div>
+      )}
+
+      {showCancelConfirm && (
+        <CancelJobConfirmModal
+          jobId={id}
+          loading={loading}
+          onClose={() => setShowCancelConfirm(false)}
+          onConfirm={() => {
+            void handleConfirmCancel();
+          }}
+        />
       )}
     </section>
   );

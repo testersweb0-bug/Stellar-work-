@@ -5,12 +5,15 @@ import {
   cancelJob,
   getJob,
   getJobCount,
+  getCompletedJobsCount,
   submitWork,
   enforceDeadline,
 } from "@/lib/contract";
+import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
 import SectionCard from "@/components/SectionCard";
+import { useToast } from "@/components/ToastProvider";
 import { toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
@@ -49,11 +52,14 @@ function formatDeadline(deadline: string) {
 
 export default function DashboardPage() {
   const { wallet, connectWallet } = useWallet();
+  const { showSuccess, showError } = useToast();
   const [allJobs, setAllJobs] = useState<Array<{ id: number; job: Job }>>([]);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "All">("All");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [pendingCancelJobId, setPendingCancelJobId] = useState<number | null>(null);
+  const [completedJobsCount, setCompletedJobsCount] = useState<number | null>(null);
   const filterOptions: Array<JobStatus | "All"> = ["All", ...STATUS_OPTIONS];
   const filterButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -71,6 +77,12 @@ export default function DashboardPage() {
         }
       }
       setAllJobs(fetched);
+      try {
+        const completed = await getCompletedJobsCount();
+        setCompletedJobsCount(completed);
+      } catch {
+        setCompletedJobsCount(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to fetch jobs.");
     } finally {
@@ -83,21 +95,42 @@ export default function DashboardPage() {
       fetchJobs();
     } else {
       setAllJobs([]);
+      setCompletedJobsCount(null);
       setLoading(false);
       setError(null);
     }
   }, [wallet, fetchJobs]);
 
-  const handleAction = async (fn: () => Promise<unknown>, jobId: number) => {
+  const handleAction = async (
+    fn: () => Promise<unknown>,
+    jobId: number,
+    successMessage = "Action completed successfully.",
+  ) => {
     setActionLoading(jobId);
     try {
       await fn();
       await fetchJobs();
+      showSuccess(successMessage);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Action failed.");
+      const message = e instanceof Error ? e.message : "Action failed.";
+      setError(message);
+      showError(message);
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!wallet || pendingCancelJobId === null) {
+      return;
+    }
+    const jobId = pendingCancelJobId;
+    await handleAction(
+      () => cancelJob(wallet, String(jobId)),
+      jobId,
+      "Job cancelled and funds refunded.",
+    );
+    setPendingCancelJobId(null);
   };
 
   const postedJobs = allJobs.filter((j) => j.job.client === wallet);
@@ -150,6 +183,19 @@ export default function DashboardPage() {
     <section className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
 
+      <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+        <div className="interactive-card p-4">
+          <p className="text-2xl font-bold tabular-nums">
+            {completedJobsCount ?? "—"}
+          </p>
+          <p className="text-xs text-slate-500">Completed jobs (contract)</p>
+        </div>
+        <div className="interactive-card p-4">
+          <p className="text-2xl font-bold tabular-nums">{allJobs.length}</p>
+          <p className="text-xs text-slate-500">Your jobs on record</p>
+        </div>
+      </div>
+
       <div
         className="flex flex-wrap gap-2"
         role="toolbar"
@@ -187,6 +233,7 @@ export default function DashboardPage() {
             role="client"
             actionLoading={actionLoading}
             onAction={handleAction}
+            onRequestCancel={setPendingCancelJobId}
           />
           <JobSection
             title="Accepted Jobs"
@@ -196,8 +243,20 @@ export default function DashboardPage() {
             role="freelancer"
             actionLoading={actionLoading}
             onAction={handleAction}
+            onRequestCancel={setPendingCancelJobId}
           />
         </>
+      )}
+
+      {pendingCancelJobId !== null && (
+        <CancelJobConfirmModal
+          jobId={String(pendingCancelJobId)}
+          loading={actionLoading === pendingCancelJobId}
+          onClose={() => setPendingCancelJobId(null)}
+          onConfirm={() => {
+            void handleConfirmCancel();
+          }}
+        />
       )}
     </section>
   );
@@ -211,6 +270,7 @@ function JobSection({
   role,
   actionLoading,
   onAction,
+  onRequestCancel,
 }: {
   title: string;
   subtitle: string;
@@ -219,6 +279,7 @@ function JobSection({
   role: "client" | "freelancer";
   actionLoading: number | null;
   onAction: (fn: () => Promise<unknown>, jobId: number) => Promise<void>;
+  onRequestCancel: (jobId: number) => void;
 }) {
   return (
     <div>
@@ -240,6 +301,7 @@ function JobSection({
                 role={role}
                 isLoading={actionLoading === id}
                 onAction={onAction}
+                onRequestCancel={onRequestCancel}
               />
             </li>
           ))}
@@ -256,6 +318,7 @@ function JobCard({
   role,
   isLoading,
   onAction,
+  onRequestCancel,
 }: {
   id: number;
   job: Job;
@@ -263,11 +326,12 @@ function JobCard({
   role: "client" | "freelancer";
   isLoading: boolean;
   onAction: (fn: () => Promise<unknown>, jobId: number) => Promise<void>;
+  onRequestCancel: (jobId: number) => void;
 }) {
   const actions = getActions(id, job, wallet, role);
 
   return (
-    <article className="h-full rounded-lg border border-slate-200 bg-white p-4">
+    <article className="interactive-card h-full p-4">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-medium">Job #{id}</h3>
         <span
@@ -298,8 +362,15 @@ function JobCard({
               key={action.label}
               disabled={isLoading}
               className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:max-w-44"
-              onClick={() => onAction(() => action.fn(), id)}
+              onClick={() => {
+                if (action.label === "Cancel Job") {
+                  onRequestCancel(id);
+                  return;
+                }
+                void onAction(() => action.fn(), id);
+              }}
               title={action.label}
+              aria-haspopup={action.label === "Cancel Job" ? "dialog" : undefined}
             >
               <span className="block truncate">{isLoading ? "..." : action.label}</span>
             </button>

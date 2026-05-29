@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import JobDetailPage from "@/app/job/[id]/page";
+import { ToastProvider } from "@/components/ToastProvider";
 import type { Job } from "@/lib/types";
 
 const mockGetJob = vi.fn();
@@ -51,7 +52,11 @@ describe("Job detail action visibility", () => {
 
   it("shows open-state actions correctly by role", async () => {
     mockGetJob.mockResolvedValue(makeJob({ status: "Open", client: "GWALLET" }));
-    render(<JobDetailPage />);
+    render(
+      <ToastProvider>
+        <JobDetailPage />
+      </ToastProvider>,
+    );
 
     await waitFor(() => expect(screen.getByText("Cancel Job")).toBeInTheDocument());
     expect(screen.getByText("Accept Job")).toBeInTheDocument();
@@ -67,7 +72,11 @@ describe("Job detail action visibility", () => {
         freelancer: "GWALLET",
       }),
     );
-    render(<JobDetailPage />);
+    render(
+      <ToastProvider>
+        <JobDetailPage />
+      </ToastProvider>,
+    );
 
     await waitFor(() => expect(screen.getByText("Submit Work")).toBeInTheDocument());
     expect(screen.queryByText("Approve Work")).not.toBeInTheDocument();
@@ -82,7 +91,11 @@ describe("Job detail action visibility", () => {
         freelancer: "GFREELANCER",
       }),
     );
-    render(<JobDetailPage />);
+    render(
+      <ToastProvider>
+        <JobDetailPage />
+      </ToastProvider>,
+    );
 
     await waitFor(() => expect(screen.getByText("Approve Work")).toBeInTheDocument());
     expect(screen.queryByText("Submit Work")).not.toBeInTheDocument();
@@ -95,7 +108,11 @@ describe("Job detail action visibility", () => {
       connectWallet: vi.fn(),
     });
     mockGetJob.mockResolvedValue(makeJob({ status: "Open", client: "GCLIENT" }));
-    render(<JobDetailPage />);
+    render(
+      <ToastProvider>
+        <JobDetailPage />
+      </ToastProvider>,
+    );
 
     const button = await screen.findByRole("button", { name: "Accept Job" });
     expect(button).toBeDisabled();
@@ -108,7 +125,11 @@ describe("Job detail action visibility", () => {
     mockRouteId = "999";
     mockGetJob.mockResolvedValue(null);
 
-    render(<JobDetailPage />);
+    render(
+      <ToastProvider>
+        <JobDetailPage />
+      </ToastProvider>,
+    );
 
     await waitFor(() =>
       expect(screen.getByText("Job not found.")).toBeInTheDocument(),

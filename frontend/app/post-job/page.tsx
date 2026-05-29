@@ -1,6 +1,6 @@
 "use client";
 
-import { postJob } from "@/lib/contract";
+import { getDescPayloadMax, postJob } from "@/lib/contract";
 import ErrorBanner from "@/components/ErrorBanner";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
@@ -27,6 +27,7 @@ export default function PostJobPage() {
   const [lastAnnouncedSuccess, setLastAnnouncedSuccess] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [maxDescPayloadBytes, setMaxDescPayloadBytes] = useState(4096);
   const [fieldErrors, setFieldErrors] = useState<{
     amount?: string;
     description?: string;
@@ -51,6 +52,18 @@ export default function PostJobPage() {
       setTxHash(null);
     }
   }, [wallet]);
+
+  useEffect(() => {
+    void getDescPayloadMax()
+      .then((maxBytes) => {
+        if (maxBytes > 0) {
+          setMaxDescPayloadBytes(maxBytes);
+        }
+      })
+      .catch(() => {
+        // Keep default when contract read is unavailable.
+      });
+  }, []);
 
   return (
     <section className="mx-auto max-w-2xl space-y-6">
@@ -87,8 +100,11 @@ export default function PostJobPage() {
             if (!amountStroops || BigInt(amountStroops) <= 0n) {
               nextFieldErrors.amount = "Enter a valid amount with up to 7 decimal places.";
             }
+            const descriptionBytes = new TextEncoder().encode(description.trim()).length;
             if (!description.trim()) {
               nextFieldErrors.description = "Job description cannot be empty.";
+            } else if (descriptionBytes > maxDescPayloadBytes) {
+              nextFieldErrors.description = `Description must be at most ${maxDescPayloadBytes} bytes (currently ${descriptionBytes}).`;
             }
             if (deadline) {
               const today = new Date();
@@ -110,16 +126,19 @@ export default function PostJobPage() {
               setFieldErrors(nextFieldErrors);
               return;
             }
-            const hashHex = await sha256Hex(description);
+            const trimmedDescription = description.trim();
+            const hashHex = await sha256Hex(trimmedDescription);
+            const descriptionPayloadLen = new TextEncoder().encode(trimmedDescription).length;
             const deadlineUnix = deadline
               ? Math.floor(new Date(deadline).getTime() / 1000).toString()
               : "0";
 
-            localStorage.setItem(`job-desc:${hashHex}`, description);
+            localStorage.setItem(`job-desc:${hashHex}`, trimmedDescription);
             const result = await postJob(
               wallet,
               amountStroops,
               hashHex,
+              descriptionPayloadLen,
               deadlineUnix,
               tokenAddress,
             );
