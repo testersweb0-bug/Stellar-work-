@@ -95,11 +95,19 @@ export default function ProfilePageClient({ address }: { address: string }) {
   if (!addressValid) {
     return (
       <section className="mx-auto max-w-3xl space-y-6">
-        <h1 className="text-2xl font-semibold">Profile</h1>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-blue-600 hover:underline">
+            Back to Home
+          </Link>
+          <h1 className="text-2xl font-semibold">Profile</h1>
+        </div>
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
           <p className="font-medium text-red-800">Invalid Address</p>
           <p className="mt-1 text-sm text-red-600">
             &ldquo;{address}&rdquo; is not a valid Stellar address.
+          </p>
+          <p className="mt-3 text-xs text-red-600">
+            Stellar addresses start with &ldquo;G&rdquo; and are 56 characters long.
           </p>
         </div>
       </section>
@@ -109,11 +117,16 @@ export default function ProfilePageClient({ address }: { address: string }) {
   if (!wallet) {
     return (
       <section className="mx-auto max-w-3xl space-y-6">
-        <h1 className="text-2xl font-semibold">Profile</h1>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-blue-600 hover:underline">
+            Back to Home
+          </Link>
+          <h1 className="text-2xl font-semibold">Profile</h1>
+        </div>
         <div className="rounded-lg border border-slate-200 bg-white p-8 text-center">
           <p className="text-slate-600">Connect your wallet to view this profile.</p>
           <button
-            className="mt-4 rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white"
+            className="mt-4 rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
             onClick={async () => {
               try {
                 await connectWallet();
@@ -131,9 +144,14 @@ export default function ProfilePageClient({ address }: { address: string }) {
 
   return (
     <section className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Profile</h1>
-        <p className="mt-1 font-mono text-sm text-slate-500">{address}</p>
+      <div className="flex items-center gap-4">
+        <Link href="/" className="text-sm text-blue-600 hover:underline">
+          Back to Home
+        </Link>
+        <div>
+          <h1 className="text-2xl font-semibold">Profile</h1>
+          <p className="mt-1 font-mono text-sm text-slate-500">{address}</p>
+        </div>
       </div>
 
       {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}

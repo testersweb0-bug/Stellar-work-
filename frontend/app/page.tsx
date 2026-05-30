@@ -7,6 +7,7 @@ import SectionCard from "@/components/SectionCard";
 import { acceptJob, getJob, getJobCount } from "@/lib/contract";
 import { toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
+import { getRecentJobIds, getJobWindowBounds } from "@/lib/recent-ids";
 import type { Job } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
@@ -95,16 +96,14 @@ export default function HomePage() {
         setPage(safePage);
       }
 
-      const endId = Math.max(1, count - (safePage - 1) * pageSize);
-      const startId = Math.max(1, endId - pageSize + 1);
-
-      const idsToFetch = Array.from(
-        { length: endId - startId + 1 },
-        (_, i) => String(startId + i),
-      );
-      if (sortOrder === "newest") {
-        idsToFetch.reverse();
+      const bounds = getJobWindowBounds(count, safePage, pageSize);
+      if (!bounds) {
+        setJobs([]);
+        setLoading(false);
+        return;
       }
+
+      const idsToFetch = getRecentJobIds(bounds.startId, bounds.endId, sortOrder);
 
       const results = await Promise.all(
         idsToFetch.map(async (id) => {
