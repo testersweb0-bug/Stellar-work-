@@ -225,8 +225,38 @@ export default function HomePage() {
 
   return (
     <section className="space-y-6">
+      {/* Hero Section */}
+      <div className="rounded-lg border border-slate-200 bg-white p-6 md:p-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex-1">
+            <h1 className="text-2xl font-semibold text-slate-900 md:text-3xl">
+              Find Your Next Opportunity
+            </h1>
+            <p className="mt-2 text-sm text-slate-600 md:text-base">
+              Browse open jobs or post your own project on the decentralized Stellar marketplace.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/post-job"
+              className="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 active:bg-blue-800 transition-colors text-center"
+            >
+              Post a Job
+            </Link>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="rounded-md border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors text-center"
+              disabled={loading}
+            >
+              {loading ? "Refreshing..." : "Browse Jobs"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Open Jobs</h1>
+        <h2 className="text-xl font-semibold text-slate-900">Open Jobs</h2>
         <button
           type="button"
           onClick={() => void refresh()}
