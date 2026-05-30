@@ -2,6 +2,8 @@
 
 Thanks for contributing.
 
+New contributors: start with the [onboarding checklist](docs/contributor-onboarding-checklist.md) and the [docs index](docs/README.md).
+
 ## Branching
 
 - Fork and create branches as `feature/<issue-number>-<short-description>`.

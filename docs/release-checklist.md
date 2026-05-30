@@ -23,7 +23,7 @@ Use this checklist before creating a release tag.
 
 ## Release
 
-- Update release notes/changelog for user-facing and contract changes
+- Update release notes/changelog for user-facing and contract changes (see [release-notes-guide.md](./release-notes-guide.md))
 - Bump version in the release metadata used by maintainers
 - Create and push a version tag (example: `v1.2.0`)
 - Open GitHub release for the tag and attach notes/artifacts as needed
