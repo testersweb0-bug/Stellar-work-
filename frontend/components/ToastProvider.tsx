@@ -47,13 +47,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const push = useCallback(
     (message: string, variant: ToastVariant) => {
-      const id = `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      setToasts((current) => [...current, { id, message, variant }]);
-      const timer = setTimeout(() => {
-        timersRef.current.delete(id);
-        dismiss(id, false);
-      }, AUTO_DISMISS_MS);
-      timersRef.current.set(id, timer);
+      setToasts((current) => {
+        // Check for duplicate toast with same message and variant
+        const isDuplicate = current.some(
+          (toast) => toast.message === message && toast.variant === variant,
+        );
+        if (isDuplicate) {
+          return current;
+        }
+        const id = `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const timer = setTimeout(() => {
+          timersRef.current.delete(id);
+          dismiss(id, false);
+        }, AUTO_DISMISS_MS);
+        timersRef.current.set(id, timer);
+        return [...current, { id, message, variant }];
+      });
     },
     [dismiss, idPrefix],
   );
