@@ -547,6 +547,10 @@ impl EscrowContract {
         count_jobs_with_status(&e, JobStatus::Completed)
     }
 
+    pub fn get_cancelled_jobs_count(e: Env) -> u64 {
+        count_jobs_with_status(&e, JobStatus::Cancelled)
+    }
+
     pub fn get_desc_payload_max(e: Env) -> u32 {
         get_description_payload_max_bytes_storage(&e)
     }
@@ -1865,6 +1869,140 @@ mod test {
         client.submit_work(&freelancer, &job_id);
         client.approve_work(&user, &job_id);
         assert_eq!(client.get_completed_jobs_count(), 1);
+    }
+
+    #[test]
+    fn get_completed_jobs_count_increments_on_dispute_resolution_freelancer_wins() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.raise_dispute(&user, &job_id);
+        client.resolve_dispute(&job_id, &DisputeResolution { client_bps: 0 });
+        assert_eq!(client.get_completed_jobs_count(), 1);
+    }
+
+    #[test]
+    fn get_completed_jobs_count_tracks_multiple_completions() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id1 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let job_id2 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        
+        client.accept_job(&freelancer, &job_id1);
+        client.submit_work(&freelancer, &job_id1);
+        client.approve_work(&user, &job_id1);
+        assert_eq!(client.get_completed_jobs_count(), 1);
+        
+        client.accept_job(&freelancer, &job_id2);
+        client.submit_work(&freelancer, &job_id2);
+        client.approve_work(&user, &job_id2);
+        assert_eq!(client.get_completed_jobs_count(), 2);
+    }
+
+    #[test]
+    fn get_cancelled_jobs_count_starts_at_zero() {
+        let (_, client, _, _, _, _) = setup();
+        assert_eq!(client.get_cancelled_jobs_count(), 0);
+    }
+
+    #[test]
+    fn get_cancelled_jobs_count_increments_on_cancel() {
+        let (env, client, _, user, _, native_token) = setup();
+        let job_id = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        assert_eq!(client.get_cancelled_jobs_count(), 0);
+        client.cancel_job(&user, &job_id);
+        assert_eq!(client.get_cancelled_jobs_count(), 1);
+    }
+
+    #[test]
+    fn get_cancelled_jobs_count_tracks_multiple_cancel_paths() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        
+        // Cancel via cancel_job
+        let job_id1 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.cancel_job(&user, &job_id1);
+        assert_eq!(client.get_cancelled_jobs_count(), 1);
+        
+        // Cancel via enforce_deadline
+        let deadline = 1_710_000_000 + 3600;
+        let job_id2 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &deadline, &native_token);
+        client.accept_job(&freelancer, &job_id2);
+        env.ledger().with_mut(|li| {
+            li.timestamp = deadline + 1;
+        });
+        client.enforce_deadline(&user, &job_id2);
+        assert_eq!(client.get_cancelled_jobs_count(), 2);
+        
+        // Cancel via dispute resolution (client wins)
+        let job_id3 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id3);
+        client.raise_dispute(&user, &job_id3);
+        client.resolve_dispute(&job_id3, &DisputeResolution { client_bps: 10_000 });
+        assert_eq!(client.get_cancelled_jobs_count(), 3);
+    }
+
+    #[test]
+    fn get_cancelled_jobs_count_increments_on_enforce_deadline() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let deadline = 1_710_000_000 + 3600;
+        let job_id = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &deadline, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        
+        env.ledger().with_mut(|li| {
+            li.timestamp = deadline + 1;
+        });
+        
+        assert_eq!(client.get_cancelled_jobs_count(), 0);
+        client.enforce_deadline(&user, &job_id);
+        assert_eq!(client.get_cancelled_jobs_count(), 1);
+    }
+
+    #[test]
+    fn get_cancelled_jobs_count_increments_on_dispute_resolution_client_wins() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.raise_dispute(&user, &job_id);
+        
+        assert_eq!(client.get_cancelled_jobs_count(), 0);
+        client.resolve_dispute(&job_id, &DisputeResolution { client_bps: 10_000 });
+        assert_eq!(client.get_cancelled_jobs_count(), 1);
+    }
+
+    #[test]
+    fn get_completed_and_cancelled_counts_track_mixed_statuses() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        
+        // Post 4 jobs
+        let j1 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let j2 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let j3 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let j4 = client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        
+        // Complete j1
+        client.accept_job(&freelancer, &j1);
+        client.submit_work(&freelancer, &j1);
+        client.approve_work(&user, &j1);
+        assert_eq!(client.get_completed_jobs_count(), 1);
+        assert_eq!(client.get_cancelled_jobs_count(), 0);
+        
+        // Cancel j2
+        client.cancel_job(&user, &j2);
+        assert_eq!(client.get_completed_jobs_count(), 1);
+        assert_eq!(client.get_cancelled_jobs_count(), 1);
+        
+        // Complete j3 via dispute resolution (freelancer wins)
+        client.accept_job(&freelancer, &j3);
+        client.raise_dispute(&user, &j3);
+        client.resolve_dispute(&j3, &DisputeResolution { client_bps: 0 });
+        assert_eq!(client.get_completed_jobs_count(), 2);
+        assert_eq!(client.get_cancelled_jobs_count(), 1);
+        
+        // Cancel j4 via dispute resolution (client wins)
+        client.accept_job(&freelancer, &j4);
+        client.raise_dispute(&user, &j4);
+        client.resolve_dispute(&j4, &DisputeResolution { client_bps: 10_000 });
+        assert_eq!(client.get_completed_jobs_count(), 2);
+        assert_eq!(client.get_cancelled_jobs_count(), 2);
     }
 
     #[test]
