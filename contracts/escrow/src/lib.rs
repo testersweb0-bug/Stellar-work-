@@ -2974,4 +2974,514 @@ mod test {
         let escrow_after = token_client.balance(&client.address);
         assert_eq!(escrow_after - escrow_before, total);
     }
+
+    // ── SC-TEST-48 (#327): Large job amount fee calculation ────────────────────
+    //
+    // Verify fee math for large token amounts does not overflow and matches
+    // the contract formula. Check conservation invariant: payout + fee = amount.
+
+    /// Large amount fee calculation must produce correct payout and fee,
+    /// and the contract escrow must hold the full amount until approval.
+    #[test]
+    fn large_amount_fee_calculation_correct() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let asset = token::StellarAssetClient::new(&env, &native_token);
+
+        // Mint enough for a large-amount test (50 million XLM in stroops)
+        let large_amount: i128 = 50_000_000_000_000i128;
+        asset.mint(&user, &large_amount);
+
+        let token_client = token::Client::new(&env, &native_token);
+        let _client_pre = token_client.balance(&user);
+        let freelancer_pre = token_client.balance(&freelancer);
+        let contract_address = client.address.clone();
+        let escrow_pre = token_client.balance(&contract_address);
+
+        let job_id =
+            client.post_job(&user, &large_amount, &hash(&env), &32u32, &0u64, &native_token);
+        assert_eq!(client.get_job(&job_id).amount, large_amount);
+
+        // Escrow holds the full amount after post
+        let escrow_after_post = token_client.balance(&contract_address);
+        assert_eq!(escrow_after_post - escrow_pre, large_amount);
+
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+
+        // Fee = 250 bps of large_amount
+        let expected_fee = large_amount * DEFAULT_FEE_BPS / BPS_DENOMINATOR;
+        let expected_payout = large_amount - expected_fee;
+
+        assert_eq!(client.get_fees(&native_token), expected_fee);
+        assert_eq!(
+            token_client.balance(&freelancer) - freelancer_pre,
+            expected_payout
+        );
+        // Conservation: payout + fee == original amount
+        assert_eq!(
+            expected_payout + expected_fee,
+            large_amount,
+            "payout + fee must equal original job amount for large amounts"
+        );
+
+        // Escrow holds only the fee after approval (fee hasn't been withdrawn yet)
+        let escrow_after = token_client.balance(&contract_address);
+        assert_eq!(
+            escrow_after, expected_fee,
+            "escrow must hold only the accrued fee after job completion"
+        );
+
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::Completed);
+    }
+
+    /// Amount near i128::MAX / 10_000 must not overflow during fee computation.
+    /// With default 250 bps fee, the intermediate multiplication
+    /// `amount * 250` stays well within i128 range.
+    #[test]
+    fn large_amount_near_i128_limit_no_overflow() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let asset = token::StellarAssetClient::new(&env, &native_token);
+
+        // Max safe amount that works even with 100% fee (10_000 bps)
+        let max_safe = i128::MAX / BPS_DENOMINATOR;
+        asset.mint(&user, &max_safe);
+
+        let token_client = token::Client::new(&env, &native_token);
+        let freelancer_pre = token_client.balance(&freelancer);
+        let contract_address = client.address.clone();
+
+        let job_id =
+            client.post_job(&user, &max_safe, &hash(&env), &32u32, &0u64, &native_token);
+        assert_eq!(client.get_job(&job_id).amount, max_safe);
+
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+
+        let expected_fee = max_safe * DEFAULT_FEE_BPS / BPS_DENOMINATOR;
+        let expected_payout = max_safe - expected_fee;
+
+        assert_eq!(client.get_fees(&native_token), expected_fee);
+        assert_eq!(
+            token_client.balance(&freelancer) - freelancer_pre,
+            expected_payout
+        );
+        assert_eq!(
+            expected_payout + expected_fee,
+            max_safe,
+            "conservation invariant holds at near-limit amounts"
+        );
+
+        // Escrow released after full lifecycle
+        assert_eq!(
+            token_client.balance(&contract_address),
+            expected_fee,
+            "escrow must hold only the fee after completion"
+        );
+    }
+
+    /// Multiple large-amount approvals accumulate fees correctly without
+    /// overflow or rounding errors across consecutive jobs.
+    #[test]
+    fn large_amount_fee_accumulation_multiple_jobs() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let asset = token::StellarAssetClient::new(&env, &native_token);
+        asset.mint(&user, &100_000_000_000_000i128);
+
+        let amounts: [i128; 3] = [
+            10_000_000_000_000i128,
+            25_000_000_000_000i128,
+            40_000_000_000_000i128,
+        ];
+        let mut total_fees: i128 = 0;
+
+        for amount in amounts.iter() {
+            let job_id =
+                client.post_job(&user, amount, &hash(&env), &32u32, &0u64, &native_token);
+            client.accept_job(&freelancer, &job_id);
+            client.submit_work(&freelancer, &job_id);
+            client.approve_work(&user, &job_id);
+            total_fees += amount * DEFAULT_FEE_BPS / BPS_DENOMINATOR;
+        }
+
+        assert_eq!(
+            client.get_fees(&native_token),
+            total_fees,
+            "accumulated fees must match sum of individual large-job fees"
+        );
+        // Total accrued fees must never exceed the total amount approved
+        let total_amount: i128 = amounts.iter().sum();
+        assert!(
+            client.get_fees(&native_token) <= total_amount,
+            "fees must never exceed total approved amount for large jobs"
+        );
+    }
+
+    // ── SC-TEST-49 (#328): raise_dispute invalid-status panics ─────────────────
+    //
+    // raise_dispute is only valid on InProgress and SubmittedForReview jobs.
+    // Calling it on any other status must panic with Error::InvalidStatus (#3)
+    // and leave the contract state unchanged.
+
+    /// raise_dispute on an Open job must panic with InvalidStatus.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn raise_dispute_on_open_panics() {
+        let (env, client, _, user, _, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        // Only InProgress and SubmittedForReview are disputable; Open must panic.
+        client.raise_dispute(&user, &job_id);
+    }
+
+    /// raise_dispute on a Completed job must panic with InvalidStatus.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn raise_dispute_on_completed_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+        // Completed jobs have been finalised; dispute is no longer possible.
+        client.raise_dispute(&user, &job_id);
+    }
+
+    /// raise_dispute on a Cancelled job must panic with InvalidStatus.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn raise_dispute_on_cancelled_panics() {
+        let (env, client, _, user, _, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.cancel_job(&user, &job_id);
+        // Cancelled jobs are final; dispute cannot be raised.
+        client.raise_dispute(&user, &job_id);
+    }
+
+    /// raise_dispute on an already Disputed job must panic with InvalidStatus.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn raise_dispute_on_disputed_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.raise_dispute(&freelancer, &job_id);
+        // A second raise_dispute on the same Disputed job must panic.
+        client.raise_dispute(&user, &job_id);
+    }
+
+    /// After a failed raise_dispute call, the job state and escrow balance
+    /// must remain exactly as they were before the call.
+    #[test]
+    fn raise_dispute_state_unchanged_after_failed_call() {
+        let (env, client, _, user, _, native_token) = setup();
+        let contract_address = client.address.clone();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+
+        // Capture pre-failure state
+        let job_before = client.get_job(&job_id);
+        let escrow_before =
+            token::Client::new(&env, &native_token).balance(&contract_address);
+
+        // Attempt raise_dispute on Open job — must panic
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.raise_dispute(&user, &job_id);
+        }));
+        assert!(result.is_err(), "raise_dispute must panic on Open job");
+
+        // State must be identical after failed attempt
+        let job_after = client.get_job(&job_id);
+        assert_eq!(
+            job_after.status, job_before.status,
+            "status must not change after failed raise_dispute"
+        );
+        assert_eq!(
+            job_after.freelancer, job_before.freelancer,
+            "freelancer must not change after failed raise_dispute"
+        );
+        assert_eq!(
+            job_after.amount, job_before.amount,
+            "amount must not change after failed raise_dispute"
+        );
+        let escrow_after =
+            token::Client::new(&env, &native_token).balance(&contract_address);
+        assert_eq!(
+            escrow_after, escrow_before,
+            "escrow balance must not change after failed raise_dispute"
+        );
+    }
+
+    // ── SC-TEST-50 (#329): resolve_dispute invalid-status panics ──────────────
+    //
+    // resolve_dispute is only valid on Disputed jobs. Calling it on any other
+    // status must panic with Error::InvalidStatus (#3). No token transfers
+    // may occur on failure.
+
+    /// resolve_dispute on a SubmittedForReview job must panic.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn resolve_dispute_submitted_status_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        // SubmittedForReview is not Disputed — must panic.
+        client.resolve_dispute(&job_id, &DisputeResolution { client_bps: 5_000 });
+    }
+
+    /// resolve_dispute on a Completed job must panic.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn resolve_dispute_completed_status_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+        // Completed jobs are final — must panic.
+        client.resolve_dispute(&job_id, &DisputeResolution { client_bps: 5_000 });
+    }
+
+    /// resolve_dispute on a Cancelled job must panic.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn resolve_dispute_cancelled_status_panics() {
+        let (env, client, _, user, _, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.cancel_job(&user, &job_id);
+        // Cancelled jobs are final — must panic.
+        client.resolve_dispute(&job_id, &DisputeResolution { client_bps: 5_000 });
+    }
+
+    /// After a failed resolve_dispute call, no token transfers occur and the
+    /// contract state remains unchanged.
+    #[test]
+    fn resolve_dispute_no_token_transfer_on_failure() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let contract_address = client.address.clone();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+
+        let token_client = token::Client::new(&env, &native_token);
+        let client_balance_before = token_client.balance(&user);
+        let freelancer_balance_before = token_client.balance(&freelancer);
+        let escrow_before = token_client.balance(&contract_address);
+        let job_before = client.get_job(&job_id);
+
+        // Attempt resolve_dispute on Open job — must panic
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.resolve_dispute(&job_id, &DisputeResolution { client_bps: 5_000 });
+        }));
+        assert!(
+            result.is_err(),
+            "resolve_dispute must panic on non-Disputed job"
+        );
+
+        // No tokens moved
+        assert_eq!(
+            token_client.balance(&user),
+            client_balance_before,
+            "client balance must not change after failed resolve_dispute"
+        );
+        assert_eq!(
+            token_client.balance(&freelancer),
+            freelancer_balance_before,
+            "freelancer balance must not change after failed resolve_dispute"
+        );
+        assert_eq!(
+            token_client.balance(&contract_address),
+            escrow_before,
+            "escrow balance must not change after failed resolve_dispute"
+        );
+
+        // Job state unchanged
+        let job_after = client.get_job(&job_id);
+        assert_eq!(
+            job_after.status, job_before.status,
+            "status must not change after failed resolve_dispute"
+        );
+        assert_eq!(job_after.amount, job_before.amount);
+    }
+
+    // ── SC-TEST-51 (#330): Full lifecycle state transitions ───────────────────
+    //
+    // End-to-end test covering Open → Accepted → Submitted → Completed (and
+    // optional cancel path) with explicit status assertions at each step and
+    // token balance checks for client, freelancer, and escrow.
+
+    /// Happy path: post_job → accept_job → submit_work → approve_work with
+    /// status assertions after each transition and balance checks at completion.
+    #[test]
+    fn full_lifecycle_happy_path_status_and_balances() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let contract_address = client.address.clone();
+
+        let client_pre = token_client.balance(&user);
+        let freelancer_pre = token_client.balance(&freelancer);
+        let escrow_pre = token_client.balance(&contract_address);
+
+        // Step 1: post_job → Open
+        let amount: i128 = 1_000_000;
+        let job_id =
+            client.post_job(&user, &amount, &hash(&env), &32u32, &0u64, &native_token);
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::Open);
+        assert_eq!(job.amount, amount);
+        assert_eq!(job.client, user);
+        assert_eq!(job.freelancer, Option::None);
+        assert_eq!(
+            token_client.balance(&contract_address) - escrow_pre,
+            amount,
+            "escrow must hold the job amount after post"
+        );
+
+        // Step 2: accept_job → InProgress
+        client.accept_job(&freelancer, &job_id);
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::InProgress);
+        assert_eq!(
+            job.freelancer,
+            Option::Some(freelancer.clone()),
+            "freelancer must be assigned after accept"
+        );
+
+        // Step 3: submit_work → SubmittedForReview
+        client.submit_work(&freelancer, &job_id);
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::SubmittedForReview);
+
+        // Step 4: approve_work → Completed
+        client.approve_work(&user, &job_id);
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::Completed);
+
+        // Balance checks at completion
+        let expected_fee = amount * DEFAULT_FEE_BPS / BPS_DENOMINATOR;
+        let expected_payout = amount - expected_fee;
+
+        assert_eq!(
+            token_client.balance(&freelancer) - freelancer_pre,
+            expected_payout,
+            "freelancer must receive payout minus fee"
+        );
+        assert_eq!(
+            token_client.balance(&user),
+            client_pre - amount,
+            "client balance must reflect the escrowed amount (no refund)"
+        );
+        assert_eq!(
+            token_client.balance(&contract_address),
+            escrow_pre + expected_fee,
+            "escrow must hold only the accrued fee after completion"
+        );
+        assert_eq!(
+            client.get_fees(&native_token),
+            expected_fee,
+            "accrued fees must match expected"
+        );
+    }
+
+    /// Cancel from Open: escrowed amount is returned to the client in full,
+    /// freelancer receives nothing, escrow returns to pre-post balance.
+    #[test]
+    fn full_lifecycle_cancel_open_returns_escrow() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let contract_address = client.address.clone();
+
+        let client_pre = token_client.balance(&user);
+        let freelancer_pre = token_client.balance(&freelancer);
+        let escrow_pre = token_client.balance(&contract_address);
+
+        let amount: i128 = 1_000_000;
+        let job_id =
+            client.post_job(&user, &amount, &hash(&env), &32u32, &0u64, &native_token);
+        assert_eq!(client.get_job(&job_id).status, JobStatus::Open);
+        assert_eq!(
+            token_client.balance(&contract_address) - escrow_pre,
+            amount,
+            "escrow holds the amount after post"
+        );
+
+        // Cancel from Open
+        client.cancel_job(&user, &job_id);
+        assert_eq!(
+            client.get_job(&job_id).status,
+            JobStatus::Cancelled,
+            "job must be Cancelled after cancel_job"
+        );
+
+        // Full refund to client, no fee deducted
+        assert_eq!(
+            token_client.balance(&user),
+            client_pre,
+            "client must be fully refunded after cancel from Open"
+        );
+        assert_eq!(
+            token_client.balance(&freelancer),
+            freelancer_pre,
+            "freelancer must not receive any tokens after cancel"
+        );
+        assert_eq!(
+            token_client.balance(&contract_address),
+            escrow_pre,
+            "escrow must return to pre-post balance after cancel"
+        );
+        assert_eq!(
+            client.get_fees(&native_token),
+            0,
+            "no fees must be accrued on a cancelled job"
+        );
+    }
+
+    /// Escrow balance invariant across the full lifecycle: funds enter escrow
+    /// on post_job and leave on approve_work (minus fee) or cancel_job (full).
+    #[test]
+    fn full_lifecycle_escrow_invariant() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let contract_address = client.address.clone();
+
+        let escrow_pre = token_client.balance(&contract_address);
+        let amount: i128 = 2_000_000;
+
+        // Post: funds enter escrow
+        let job_id =
+            client.post_job(&user, &amount, &hash(&env), &32u32, &0u64, &native_token);
+        assert_eq!(
+            token_client.balance(&contract_address) - escrow_pre,
+            amount
+        );
+
+        // Full lifecycle
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+
+        // Escrow holds only the fee after completion
+        let expected_fee = amount * DEFAULT_FEE_BPS / BPS_DENOMINATOR;
+        assert_eq!(
+            token_client.balance(&contract_address),
+            escrow_pre + expected_fee,
+            "escrow must hold only the fee after job completion"
+        );
+
+        // Withdraw fees → escrow back to pre-post balance
+        client.withdraw_fees(&native_token);
+        assert_eq!(
+            token_client.balance(&contract_address),
+            escrow_pre,
+            "escrow must return to initial balance after fee withdrawal"
+        );
+    }
 }
