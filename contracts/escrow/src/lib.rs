@@ -3484,4 +3484,84 @@ mod test {
             "escrow must return to initial balance after fee withdrawal"
         );
     }
+
+    // ── SC-TEST-47 (#326): get_job returns full Job struct fields ─────────────
+    //
+    // get_job must return every documented field of the Job struct with the
+    // correct type and value across lifecycle steps. We compare against a
+    // fully-constructed expected `Job` (not field-by-field cherry-picking) so
+    // a newly-added or default-only field can't slip through unverified.
+
+    /// After post_job, every field of the returned Job matches the inputs:
+    /// client, amount, description_hash, status (Open), created_at (ledger
+    /// timestamp), deadline, token, and the defaults freelancer=None /
+    /// revision_count=0. The whole-struct compare enforces "no missing or
+    /// default-only fields".
+    #[test]
+    fn get_job_full_struct_after_post_job() {
+        let (env, client, _, user, _, native_token) = setup();
+
+        let amount = 1_000_000i128;
+        let desc_hash = hash(&env);
+        let deadline = 1_710_000_000u64 + 86_400;
+        let job_id = client.post_job(&user, &amount, &desc_hash, &32u32, &deadline, &native_token);
+
+        let expected = Job {
+            client: user.clone(),
+            freelancer: None,
+            amount,
+            description_hash: desc_hash,
+            status: JobStatus::Open,
+            // setup() pins the ledger timestamp; post_job stamps created_at with it.
+            created_at: 1_710_000_000,
+            deadline,
+            token: native_token.clone(),
+            revision_count: 0,
+        };
+
+        assert_eq!(client.get_job(&job_id), expected);
+    }
+
+    /// accept_job mutates exactly two fields — freelancer (None → Some) and
+    /// status (Open → InProgress) — and leaves everything else untouched.
+    /// submit_work then advances status (InProgress → SubmittedForReview)
+    /// while preserving the assigned freelancer and all immutable fields.
+    #[test]
+    fn get_job_fields_update_across_accept_and_submit() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+
+        let amount = 2_500_000i128;
+        let desc_hash = hash(&env);
+        let deadline = 0u64; // no deadline
+        let job_id = client.post_job(&user, &amount, &desc_hash, &32u32, &deadline, &native_token);
+
+        let posted = client.get_job(&job_id);
+        assert_eq!(posted.freelancer, None);
+        assert_eq!(posted.status, JobStatus::Open);
+
+        // accept_job: freelancer assigned, status → InProgress.
+        client.accept_job(&freelancer, &job_id);
+        let after_accept = client.get_job(&job_id);
+        let expected_accept = Job {
+            client: user.clone(),
+            freelancer: Some(freelancer.clone()),
+            amount,
+            description_hash: desc_hash.clone(),
+            status: JobStatus::InProgress,
+            created_at: posted.created_at,
+            deadline,
+            token: native_token.clone(),
+            revision_count: 0,
+        };
+        assert_eq!(after_accept, expected_accept);
+
+        // submit_work: status → SubmittedForReview, everything else stable.
+        client.submit_work(&freelancer, &job_id);
+        let after_submit = client.get_job(&job_id);
+        let expected_submit = Job {
+            status: JobStatus::SubmittedForReview,
+            ..expected_accept
+        };
+        assert_eq!(after_submit, expected_submit);
+    }
 }
