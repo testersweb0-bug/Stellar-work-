@@ -3563,5 +3563,73 @@ mod test {
             ..expected_accept
         };
         assert_eq!(after_submit, expected_submit);
+    // ── SC-TEST-46 (#325): approve_work requires client auth ──────────────────
+    //
+    // Only the job's client may approve submitted work and release payment.
+    //   • approve_work without auth must fail.
+    //   • approve_work by a non-client (the freelancer) must fail Unauthorized.
+    //   • A client-authorised approve on a SubmittedForReview job succeeds and
+    //     transitions the job to Completed.
+
+    /// Build a job all the way to `SubmittedForReview` using the mocked
+    /// auths from `setup()`, returning the env/client/addresses needed to
+    /// drive the approve_work assertions.
+    fn submitted_job() -> (
+        Env,
+        EscrowContractClient<'static>,
+        Address,
+        Address,
+        Address,
+        u64,
+    ) {
+        let (env, client, _admin, user, freelancer, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        assert_eq!(client.get_job(&job_id).status, JobStatus::SubmittedForReview);
+        (env, client, user, freelancer, native_token, job_id)
+    }
+
+    /// approve_work with no authorization present must fail. The job is
+    /// driven to SubmittedForReview with mocked auths, then auths are
+    /// cleared (`set_auths(&[])`) so `client.require_auth()` has nothing
+    /// to satisfy and the call panics.
+    #[test]
+    #[should_panic]
+    fn approve_work_without_auth_fails() {
+        let (env, client, user, _freelancer, _native_token, job_id) = submitted_job();
+        // Remove the blanket mock so require_auth is genuinely enforced.
+        env.set_auths(&[]);
+        client.approve_work(&user, &job_id);
+    }
+
+    /// approve_work by the freelancer (a non-client) must panic with
+    /// `Error::Unauthorized` (#2). The freelancer can authorise for their
+    /// own address under mock_all_auths, but the contract's
+    /// `job.client != client` check rejects them.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn approve_work_by_non_client_freelancer_fails() {
+        let (_env, client, _user, freelancer, _native_token, job_id) = submitted_job();
+        client.approve_work(&freelancer, &job_id);
+    }
+
+    /// The legitimate client approving a SubmittedForReview job succeeds:
+    /// the job transitions to Completed and the freelancer is paid the
+    /// amount net of fees.
+    #[test]
+    fn approve_work_by_client_succeeds_and_transitions_state() {
+        let (env, client, user, freelancer, native_token, job_id) = submitted_job();
+
+        let token_client = token::Client::new(&env, &native_token);
+        let pre_balance = token_client.balance(&freelancer);
+
+        client.approve_work(&user, &job_id);
+
+        assert_eq!(client.get_job(&job_id).status, JobStatus::Completed);
+        // 1_000_000 amount, 25_000 fee (DEFAULT_FEE_BPS) → 975_000 payout.
+        assert_eq!(token_client.balance(&freelancer) - pre_balance, 975_000);
+        assert_eq!(client.get_fees(&native_token), 25_000);
     }
 }
