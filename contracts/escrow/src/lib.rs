@@ -954,6 +954,37 @@ mod test {
     }
 
     #[test]
+    fn initialize_reinit_does_not_reset_state() {
+        let (env, client, admin, user, _, native_token) = setup();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        assert_eq!(client.get_job_count(), 1);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.initialize(&admin, &native_token);
+        }));
+        assert!(result.is_err(), "re-init must panic with AlreadyInitialized");
+
+        assert_eq!(
+            client.get_job_count(),
+            1,
+            "job count must not reset after failed re-init"
+        );
+        assert_eq!(client.get_admin(), admin, "admin must remain unchanged");
+        assert_eq!(
+            client.get_native_token(),
+            native_token,
+            "native token must remain unchanged"
+        );
+    }
+
+    #[test]
     fn post_job_increments_count() {
         let (env, client, _, user, _, native_token) = setup();
         let job_id = client.post_job(
@@ -1342,6 +1373,23 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn submit_work_on_submitted_for_review_job_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+    }
+
+    #[test]
     fn enforce_deadline_reclaims_funds() {
         let (env, client, _, user, freelancer, native_token) = setup();
         let deadline = 1_710_000_000 + 3600;
@@ -1608,6 +1656,14 @@ mod test {
         assert_eq!(fees_before, 0);
         assert_eq!(fees_after, 0);
         assert_eq!(admin_balance_after, admin_balance_before);
+    }
+
+    #[test]
+    #[should_panic]
+    fn withdraw_fees_without_auth_fails() {
+        let (env, client, _, _, _, native_token) = setup();
+        env.set_auths(&[]);
+        client.withdraw_fees(&native_token);
     }
 
     #[test]
@@ -4557,6 +4613,8 @@ mod test {
             ..expected_accept
         };
         assert_eq!(after_submit, expected_submit);
+    }
+
     // ── SC-TEST-46 (#325): approve_work requires client auth ──────────────────
     // ── SC-TEST-36 (#315): accept_job on non-existent job ID ─────────────────
     //
@@ -5292,6 +5350,63 @@ mod test {
             &0u64,
             &native_token,
         );
+        client.accept_job(&freelancer, &job_id);
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::InProgress);
+        assert_eq!(job.freelancer, Option::Some(freelancer));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #6)")]
+    fn accept_job_after_deadline_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let deadline = 1_710_000_000 + 3600;
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &deadline,
+            &native_token,
+        );
+        env.ledger().with_mut(|li| {
+            li.timestamp = deadline + 1;
+        });
+        client.accept_job(&freelancer, &job_id);
+    }
+
+    #[test]
+    fn accept_job_before_deadline_succeeds() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let deadline = 1_710_000_000 + 7200;
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &deadline,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        let job = client.get_job(&job_id);
+        assert_eq!(job.status, JobStatus::InProgress);
+        assert_eq!(job.freelancer, Option::Some(freelancer));
+    }
+
+    #[test]
+    fn accept_job_no_deadline_always_allowed() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        env.ledger().with_mut(|li| {
+            li.timestamp = 9_999_999_999;
+        });
         client.accept_job(&freelancer, &job_id);
         let job = client.get_job(&job_id);
         assert_eq!(job.status, JobStatus::InProgress);
