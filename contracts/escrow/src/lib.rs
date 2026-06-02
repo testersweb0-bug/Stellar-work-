@@ -3485,6 +3485,402 @@ mod test {
         );
     }
 
+    // ── SC-TEST-36 (#315): accept_job on non-existent job ID ─────────────────
+    //
+    // accept_job must handle invalid or never-created job identifiers safely
+    // without corrupting contract state.
+
+    /// accept_job with job_id = 0 (never a valid ID) must panic with
+    /// Error::JobNotFound (#1). Jobs are 1-indexed, so zero is always invalid.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1)")]
+    fn accept_job_zero_id_panics() {
+        let (env, client, _, _, freelancer, native_token) = setup();
+        let _ = (env, native_token);
+        client.accept_job(&freelancer, &0u64);
+    }
+
+    /// accept_job with an out-of-range ID (larger than any posted job) must
+    /// also panic with Error::JobNotFound (#1).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1)")]
+    fn accept_job_out_of_range_id_panics() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        // Job ID 1 exists, ID 9999 does not — must be rejected.
+        client.accept_job(&freelancer, &9999u64);
+    }
+
+    /// After a failed accept_job on a non-existent ID, contract storage
+    /// (escrow balance, job status, freelancer field) must be unchanged.
+    #[test]
+    fn accept_job_non_existent_state_unchanged() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let contract_address = client.address.clone();
+
+        // Post one known job to establish baseline.
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let escrow_before =
+            token::Client::new(&env, &native_token).balance(&contract_address);
+        let job_before = client.get_job(&job_id);
+
+        // Attempt accept_job on a non-existent ID — must panic.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.accept_job(&freelancer, &9999u64);
+        }));
+        assert!(result.is_err(), "accept_job must panic on non-existent job ID");
+
+        // Escrow balance must be identical.
+        let escrow_after =
+            token::Client::new(&env, &native_token).balance(&contract_address);
+        assert_eq!(
+            escrow_after, escrow_before,
+            "escrow balance must not change after failed accept_job"
+        );
+
+        // Existing job's state must be untouched.
+        let job_after = client.get_job(&job_id);
+        assert_eq!(
+            job_after.status, job_before.status,
+            "job status must not change after failed accept_job"
+        );
+        assert_eq!(
+            job_after.freelancer, job_before.freelancer,
+            "freelancer must not change after failed accept_job"
+        );
+        assert_eq!(
+            job_after.amount, job_before.amount,
+            "amount must not change after failed accept_job"
+        );
+    }
+
+    /// Even when the freelancer's auth is satisfied (mock_all_auths is
+    /// active), a non-existent job must still fail with JobNotFound (#1)
+    /// rather than an auth-related error.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1)")]
+    fn accept_job_non_existent_with_auth_still_fails() {
+        let (env, client, _, user, freelancer, _native_token) = setup();
+        let _ = (env, user);
+        // Auth is mocked, but a job that has never been posted cannot be
+        // accepted — the existence check fires first.
+        client.accept_job(&freelancer, &0u64);
+    }
+
+    // ── SC-TEST-37 (#316): post_job token transfer amount ─────────────────────
+    //
+    // post_job must escrow exactly the job amount from the client's token
+    // balance. The contract (escrow) balance must increase by the same
+    // amount. Insufficient client balance must be rejected before any job
+    // is stored.
+
+    /// On successful post_job, the client's token balance must decrease
+    /// by exactly the job amount.
+    #[test]
+    fn post_job_decreases_client_balance_by_amount() {
+        let (env, client, _, user, _, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let pre_balance = token_client.balance(&user);
+        let amount: i128 = 1_000_000;
+
+        client.post_job(&user, &amount, &hash(&env), &32u32, &0u64, &native_token);
+
+        let post_balance = token_client.balance(&user);
+        assert_eq!(
+            post_balance,
+            pre_balance - amount,
+            "client balance must decrease by the job amount"
+        );
+    }
+
+    /// On successful post_job, the contract's escrow balance must increase
+    /// by exactly the job amount.
+    #[test]
+    fn post_job_increases_contract_balance_by_amount() {
+        let (env, client, _, user, _, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let contract_address = client.address.clone();
+        let escrow_before = token_client.balance(&contract_address);
+        let amount: i128 = 1_000_000;
+
+        client.post_job(&user, &amount, &hash(&env), &32u32, &0u64, &native_token);
+
+        let escrow_after = token_client.balance(&contract_address);
+        assert_eq!(
+            escrow_after - escrow_before,
+            amount,
+            "escrow must increase by the job amount"
+        );
+    }
+
+    /// When the client has insufficient token balance, post_job must panic
+    /// and no job should be persisted.
+    #[test]
+    #[should_panic]
+    fn post_job_insufficient_balance_fails() {
+        let (env, client, _, user, _, native_token) = setup();
+        // User has 10_000_000_000 from setup; this amount exceeds their balance.
+        let huge_amount: i128 = 100_000_000_000_000i128;
+        client.post_job(&user, &huge_amount, &hash(&env), &32u32, &0u64, &native_token);
+    }
+
+    /// After a failed post_job due to insufficient balance, no job is
+    /// stored (job count is unchanged) and the client's balance is
+    /// unaffected.
+    #[test]
+    fn post_job_insufficient_balance_no_job_stored() {
+        let (env, client, _, user, _, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let pre_balance = token_client.balance(&user);
+        let jobs_before = client.get_job_count();
+        let huge_amount: i128 = 100_000_000_000_000i128;
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.post_job(
+                &user,
+                &huge_amount,
+                &hash(&env),
+                &32u32,
+                &0u64,
+                &native_token,
+            );
+        }));
+        assert!(
+            result.is_err(),
+            "post_job must panic with insufficient balance"
+        );
+
+        // Job count must not have increased.
+        assert_eq!(
+            client.get_job_count(),
+            jobs_before,
+            "job count must not increase after failed post_job"
+        );
+
+        // Client balance must be untouched.
+        assert_eq!(
+            token_client.balance(&user),
+            pre_balance,
+            "client balance must not change after failed post_job"
+        );
+    }
+
+    // ── SC-TEST-38 (#317): approve_work with missing freelancer ────────────────
+    //
+    // approve_work must fail when no freelancer has accepted the job
+    // (the freelancer field is None). The error must be distinct from
+    // Unauthorized (#2) where applicable, and no token release may occur.
+
+    /// approve_work on an Open job (no freelancer accepted) must panic
+    /// with InvalidStatus (#3) because the job has not reached
+    /// SubmittedForReview and has no assigned freelancer.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn approve_work_on_open_job_no_freelancer_fails() {
+        let (env, client, _, user, _, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        // Job is Open — no freelancer has accepted. approve_work must fail.
+        client.approve_work(&user, &job_id);
+    }
+
+    /// Verify the error for approve_work on a missing-freelancer job is
+    /// InvalidStatus (#3), NOT Unauthorized (#2). The contract checks
+    /// the status and freelancer fields before checking caller identity.
+    #[test]
+    fn approve_work_missing_freelancer_error_is_not_unauthorized() {
+        let (env, client, _, user, _, native_token) = setup();
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+
+        // approve_work on an Open job must fail with InvalidStatus (#3),
+        // NOT Unauthorized (#2) — the status/freelancer check comes first.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.approve_work(&user, &job_id);
+        }));
+        assert!(result.is_err(), "approve_work must panic on Open job");
+
+        let panic_payload = result.expect_err("expected panic");
+        let panic_text = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+            std::string::String::from(*s)
+        } else if let Some(s) = panic_payload.downcast_ref::<std::string::String>() {
+            s.clone()
+        } else {
+            std::format!("{:?}", panic_payload)
+        };
+
+        assert!(
+            panic_text.contains("Error(Contract, #3)"),
+            "expected InvalidStatus (#3), got: {}",
+            panic_text
+        );
+        assert!(
+            !panic_text.contains("Error(Contract, #2)"),
+            "error must NOT be Unauthorized (#2), got: {}",
+            panic_text
+        );
+    }
+
+    /// No tokens must be transferred when approve_work fails due to a
+    /// missing freelancer. Client, freelancer, and escrow balances must
+    /// remain unchanged, and the job state must be preserved.
+    #[test]
+    fn approve_work_missing_freelancer_no_token_release() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let contract_address = client.address.clone();
+        let token_client = token::Client::new(&env, &native_token);
+
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+
+        let user_balance_before = token_client.balance(&user);
+        let freelancer_balance_before = token_client.balance(&freelancer);
+        let escrow_before = token_client.balance(&contract_address);
+        let job_before = client.get_job(&job_id);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.approve_work(&user, &job_id);
+        }));
+        assert!(result.is_err(), "approve_work must panic on Open job");
+
+        // No tokens should have moved.
+        assert_eq!(
+            token_client.balance(&user),
+            user_balance_before,
+            "client balance must not change"
+        );
+        assert_eq!(
+            token_client.balance(&freelancer),
+            freelancer_balance_before,
+            "freelancer balance must not change"
+        );
+        assert_eq!(
+            token_client.balance(&contract_address),
+            escrow_before,
+            "escrow balance must not change"
+        );
+
+        // Job state must be unchanged.
+        let job_after = client.get_job(&job_id);
+        assert_eq!(
+            job_after.status, job_before.status,
+            "status must not change"
+        );
+        assert_eq!(
+            job_after.freelancer, job_before.freelancer,
+            "freelancer must not change"
+        );
+        assert_eq!(
+            job_after.amount, job_before.amount,
+            "amount must not change"
+        );
+    }
+
+    // ── SC-TEST-39 (#318): job created_at timestamp storage ────────────────────
+    //
+    // created_at must be set at post_job time from the ledger timestamp and
+    // must persist unchanged through all subsequent state transitions.
+
+    /// After post_job, get_job must return a non-zero created_at that
+    /// matches the current ledger timestamp.
+    #[test]
+    fn job_created_at_matches_ledger_timestamp() {
+        let (env, client, _, user, _, native_token) = setup();
+        let expected_timestamp = env.ledger().timestamp();
+
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let job = client.get_job(&job_id);
+
+        assert!(job.created_at > 0, "created_at must be non-zero");
+        assert_eq!(
+            job.created_at, expected_timestamp,
+            "created_at must match ledger timestamp at post_job time"
+        );
+    }
+
+    /// created_at must not change when the job transitions through
+    /// accept_job, submit_work, or approve_work.
+    #[test]
+    fn job_created_at_unchanged_after_state_transitions() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+
+        let job_id =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let created_at = client.get_job(&job_id).created_at;
+
+        // accept_job must not change created_at
+        client.accept_job(&freelancer, &job_id);
+        assert_eq!(
+            client.get_job(&job_id).created_at,
+            created_at,
+            "created_at must not change on accept_job"
+        );
+
+        // submit_work must not change created_at
+        client.submit_work(&freelancer, &job_id);
+        assert_eq!(
+            client.get_job(&job_id).created_at,
+            created_at,
+            "created_at must not change on submit_work"
+        );
+
+        // approve_work must not change created_at
+        client.approve_work(&user, &job_id);
+        assert_eq!(
+            client.get_job(&job_id).created_at,
+            created_at,
+            "created_at must not change on approve_work"
+        );
+    }
+
+    /// Multiple jobs posted in sequence must have strictly increasing
+    /// created_at values that match the ledger timestamps at each post.
+    #[test]
+    fn job_created_at_ordering_for_multiple_jobs() {
+        let (env, client, _, user, _, native_token) = setup();
+        let base_time = env.ledger().timestamp();
+
+        // Post first job
+        let id1 =
+            client.post_job(&user, &1_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let job1 = client.get_job(&id1);
+        assert_eq!(job1.created_at, base_time);
+
+        // Advance time slightly
+        env.ledger().with_mut(|li| {
+            li.timestamp = base_time + 100;
+        });
+
+        // Post second job
+        let id2 =
+            client.post_job(&user, &2_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let job2 = client.get_job(&id2);
+        assert_eq!(job2.created_at, base_time + 100);
+
+        // Advance time again
+        env.ledger().with_mut(|li| {
+            li.timestamp = base_time + 200;
+        });
+
+        // Post third job
+        let id3 =
+            client.post_job(&user, &3_000_000i128, &hash(&env), &32u32, &0u64, &native_token);
+        let job3 = client.get_job(&id3);
+        assert_eq!(job3.created_at, base_time + 200);
+
+        // Verify ordering: created_at must be strictly increasing
+        assert!(
+            job1.created_at < job2.created_at,
+            "first job's created_at must be before second's"
+        );
+        assert!(
+            job2.created_at < job3.created_at,
+            "second job's created_at must be before third's"
+        );
+    }
+
     // ── SC-TEST-46 (#325): approve_work requires client auth ──────────────────
     //
     // Only the job's client may approve submitted work and release payment.
