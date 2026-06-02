@@ -1552,7 +1552,7 @@
             "data": {
               "vec": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 },
                 {
                   "u64": 1
@@ -1577,17 +1577,17 @@
               },
               {
                 "error": {
-                  "contract": 2
+                  "auth": "invalid_action"
                 }
               }
             ],
             "data": {
               "vec": [
                 {
-                  "string": "failing with contract error"
+                  "string": "Unauthorized function call for address"
                 },
                 {
-                  "u32": 2
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 }
               ]
             }
@@ -1609,7 +1609,7 @@
               },
               {
                 "error": {
-                  "contract": 2
+                  "auth": "invalid_action"
                 }
               }
             ],
@@ -1634,7 +1634,7 @@
               },
               {
                 "error": {
-                  "contract": 2
+                  "auth": "invalid_action"
                 }
               }
             ],
@@ -1659,7 +1659,7 @@
               },
               {
                 "error": {
-                  "contract": 2
+                  "auth": "invalid_action"
                 }
               }
             ],
@@ -1674,7 +1674,7 @@
                 {
                   "vec": [
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                     },
                     {
                       "u64": 1
@@ -1701,7 +1701,7 @@
               },
               {
                 "error": {
-                  "contract": 2
+                  "auth": "invalid_action"
                 }
               }
             ],
