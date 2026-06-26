@@ -18,9 +18,10 @@ import NoResultsState from "@/components/NoResultsState";
 import SectionCard from "@/components/SectionCard";
 import StatusPill from "@/components/StatusPill";
 import { useToast } from "@/components/ToastProvider";
+import { useNotifications } from "@/lib/notifications-context";
 import { formatDeadline, toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
-import type { Job, JobStatus } from "@/lib/types";
+import type { Job, JobStatus, NotificationEvent } from "@/lib/types";
 import { useEffect, useState, useCallback, useRef, type KeyboardEvent } from "react";
 
 const STATUS_OPTIONS: JobStatus[] = [
@@ -43,6 +44,7 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 export default function DashboardPage() {
   const { wallet, connectWallet } = useWallet();
   const { showSuccess, showError } = useToast();
+  const { addNotification } = useNotifications();
   const [allJobs, setAllJobs] = useState<Array<{ id: number; job: Job }>>([]);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "All">("All");
   const [loading, setLoading] = useState(false);
@@ -94,15 +96,18 @@ export default function DashboardPage() {
   const handleAction = async (
     fn: () => Promise<unknown>,
     jobId: number,
-    successMessage = "Action completed successfully.",
+    notification?: { event: NotificationEvent; message: string },
   ) => {
     setActionLoading(jobId);
     setError(null);
     try {
       await fn();
+      if (notification) {
+        addNotification(notification.event, jobId, notification.message);
+      }
       await fetchJobs();
       setError(null);
-      showSuccess(successMessage);
+      showSuccess("Action completed successfully.");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Action failed.";
       setError(message);
@@ -120,7 +125,7 @@ export default function DashboardPage() {
     await handleAction(
       () => cancelJob(wallet, String(jobId)),
       jobId,
-      "Job cancelled and funds refunded.",
+      { event: "job_cancelled", message: `Job #${jobId} was cancelled and funds refunded.` },
     );
     setPendingCancelJobId(null);
   };
@@ -300,7 +305,7 @@ function JobSection({
   wallet: string;
   role: "client" | "freelancer";
   actionLoading: number | null;
-  onAction: (fn: () => Promise<unknown>, jobId: number) => Promise<void>;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
   onRequestCancel: (jobId: number) => void;
   onClearFilter: () => void;
 }) {
@@ -357,7 +362,7 @@ function JobCard({
   wallet: string;
   role: "client" | "freelancer";
   isLoading: boolean;
-  onAction: (fn: () => Promise<unknown>, jobId: number) => Promise<void>;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
   onRequestCancel: (jobId: number) => void;
 }) {
   const actions = getActions(id, job, wallet, role);
@@ -401,7 +406,7 @@ function JobCard({
                   onRequestCancel(id);
                   return;
                 }
-                void onAction(() => action.fn(), id);
+                void onAction(() => action.fn(), id, action.notification ?? undefined);
               }}
               title={action.label}
               aria-haspopup={action.label === "Cancel Job" ? "dialog" : undefined}
@@ -415,30 +420,52 @@ function JobCard({
   );
 }
 
+type Action = {
+  label: string;
+  fn: () => Promise<unknown>;
+  notification: { event: NotificationEvent; message: string } | null;
+};
+
 function getActions(
   id: number,
   job: Job,
   wallet: string,
   role: "client" | "freelancer",
-): Array<{ label: string; fn: () => Promise<unknown> }> {
-  const actions: Array<{ label: string; fn: () => Promise<unknown> }> = [];
+): Action[] {
+  const actions: Action[] = [];
   const jobId = String(id);
 
   if (role === "client") {
     if (job.status === "Open") {
-      actions.push({ label: "Cancel Job", fn: () => cancelJob(wallet, jobId) });
+      actions.push({
+        label: "Cancel Job",
+        fn: () => cancelJob(wallet, jobId),
+        notification: { event: "job_cancelled", message: `Job #${id} was cancelled and funds refunded.` },
+      });
     }
     if (job.status === "SubmittedForReview") {
-      actions.push({ label: "Approve Work", fn: () => approveWork(wallet, jobId) });
+      actions.push({
+        label: "Approve Work",
+        fn: () => approveWork(wallet, jobId),
+        notification: { event: "work_approved", message: `Work for Job #${id} was approved and payment released.` },
+      });
     }
     if (job.status === "InProgress" && job.deadline !== "0") {
-      actions.push({ label: "Enforce Deadline", fn: () => enforceDeadline(wallet, jobId) });
+      actions.push({
+        label: "Enforce Deadline",
+        fn: () => enforceDeadline(wallet, jobId),
+        notification: null,
+      });
     }
   }
 
   if (role === "freelancer") {
     if (job.status === "InProgress") {
-      actions.push({ label: "Submit Work", fn: () => submitWork(wallet, jobId) });
+      actions.push({
+        label: "Submit Work",
+        fn: () => submitWork(wallet, jobId),
+        notification: { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
+      });
     }
   }
 

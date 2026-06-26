@@ -7,6 +7,7 @@ import NoResultsState from "@/components/NoResultsState";
 import JobCardSkeleton from "@/components/JobCardSkeleton";
 import SectionCard from "@/components/SectionCard";
 import { acceptJob, getJob, getJobCount } from "@/lib/contract";
+import { useNotifications } from "@/lib/notifications-context";
 import { formatDeadline, toXlm } from "@/lib/format";
 import {
   clearRecentSearches,
@@ -34,6 +35,7 @@ function readViewMode(): JobsViewMode {
 
 export default function HomePage() {
   const { wallet } = useWallet();
+  const { addNotification } = useNotifications();
   const [jobs, setJobs] = useState<Array<{ id: number; job: Job }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -281,8 +283,8 @@ export default function HomePage() {
               onClick={() => void refresh()}
               className="rounded-md border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors text-center"
               disabled={loading}
-            >
-              {loading ? "Refreshing..." : "Browse Jobs"}
+          >
+            {loading ? "Refreshing..." : "Browse Jobs"}
             </button>
           </div>
         </div>
@@ -626,6 +628,7 @@ export default function HomePage() {
                         if (result.hash) {
                           setLatestTxHash(result.hash);
                         }
+                        addNotification("job_accepted", id, `You accepted Job #${id}.`);
                         await refresh();
                       } catch (e) {
                         setError(

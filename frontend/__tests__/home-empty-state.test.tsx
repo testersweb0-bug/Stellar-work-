@@ -19,6 +19,21 @@ vi.mock("@/lib/wallet-context", () => ({
   }),
 }));
 
+vi.mock("@/lib/notifications-context", () => ({
+  useNotifications: () => ({
+    notifications: [],
+    unreadCount: 0,
+    addNotification: vi.fn(),
+    markAsSeen: vi.fn(),
+    markAllAsSeen: vi.fn(),
+    preferences: { job_accepted: true, work_submitted: true, work_approved: true, job_cancelled: true, dispute_raised: true, dispute_resolved: true },
+    setPreference: vi.fn(),
+    clearNotifications: vi.fn(),
+  }),
+  NotificationProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  getEventLabel: (event: string) => event,
+}));
+
 describe("Home page empty job state", () => {
   beforeEach(() => {
     vi.clearAllMocks();

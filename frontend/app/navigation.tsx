@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useWallet, WalletButton } from "@/lib/wallet-context";
 import { useState, useEffect, useRef } from "react";
 import NetworkBadge from "@/components/NetworkBadge";
+import NotificationInbox from "@/components/NotificationInbox";
 
 export function Navigation() {
   const pathname = usePathname();
@@ -123,6 +124,7 @@ export function Navigation() {
               </Link>
             ))}
           </nav>
+          <NotificationInbox />
           <WalletButton />
         </div>
 

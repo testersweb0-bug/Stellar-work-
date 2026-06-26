@@ -5,6 +5,7 @@ import InfoTooltip from "@/components/InfoTooltip";
 import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/components/ToastProvider";
 import StatusPill from "@/components/StatusPill";
+import { useNotifications } from "@/lib/notifications-context";
 import { acceptJob, approveWork, cancelJob, getJob, submitWork } from "@/lib/contract";
 import { formatDeadline, toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
@@ -19,6 +20,7 @@ export default function JobDetailPage() {
   const id = params.id;
   const { wallet } = useWallet();
   const { showSuccess, showError } = useToast();
+  const { addNotification } = useNotifications();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,6 +93,7 @@ export default function JobDetailPage() {
   async function handleAction(
     action: () => Promise<{ hash?: string }>,
     successMessage = "Action completed successfully.",
+    notification?: { event: import("@/lib/types").NotificationEvent; message: string },
   ) {
     if (loading) return;
     setError(null);
@@ -105,6 +108,9 @@ export default function JobDetailPage() {
       const result = await action();
       if (result.hash) {
         setLatestTxHash(result.hash);
+      }
+      if (notification) {
+        addNotification(notification.event, numericId, notification.message);
       }
       await load();
       showSuccess(successMessage);
@@ -122,7 +128,11 @@ export default function JobDetailPage() {
       showError("Connect your wallet to run this action.");
       return;
     }
-    await handleAction(() => cancelJob(wallet, id), "Job cancelled and funds refunded.");
+    await handleAction(
+      () => cancelJob(wallet, id),
+      "Job cancelled and funds refunded.",
+      { event: "job_cancelled", message: `Job #${id} was cancelled and funds refunded.` },
+    );
     setShowCancelConfirm(false);
   }
 
@@ -288,7 +298,11 @@ export default function JobDetailPage() {
                     if (!wallet) {
                       return;
                     }
-                    void handleAction(() => acceptJob(wallet, id));
+                    void handleAction(
+                      () => acceptJob(wallet, id),
+                      "Job accepted successfully.",
+                      { event: "job_accepted", message: `You accepted Job #${id}.` },
+                    );
                   }}
                   disabled={!wallet || loading}
                   title={!wallet ? "Connect your wallet to accept this job." : undefined}
@@ -301,7 +315,11 @@ export default function JobDetailPage() {
               {canSubmit && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
-                  onClick={() => handleAction(() => submitWork(wallet!, id))}
+                  onClick={() => handleAction(
+                    () => submitWork(wallet!, id),
+                    "Work submitted for review.",
+                    { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
+                  )}
                   disabled={loading}
                   aria-busy={loading}
                 >
@@ -312,7 +330,11 @@ export default function JobDetailPage() {
               {canApprove && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
-                  onClick={() => handleAction(() => approveWork(wallet!, id))}
+                  onClick={() => handleAction(
+                    () => approveWork(wallet!, id),
+                    "Work approved and payment released.",
+                    { event: "work_approved", message: `Work for Job #${id} was approved and payment released.` },
+                  )}
                   disabled={loading}
                   aria-busy={loading}
                 >

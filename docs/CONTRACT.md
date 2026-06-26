@@ -46,3 +46,30 @@ Location: `contracts/escrow/src/lib.rs`
 - `5` JobAlreadyAccepted
 - `6` DeadlinePassed
 - `7` AlreadyInitialized
+
+## Upgrade Mechanism
+
+The contract supports a two-step upgrade process with a timelock delay (24 hours) to update the contract WASM while preserving storage state.
+
+### Flow
+
+1. **Propose**: Admin calls `propose_upgrade(admin, new_wasm_hash)` to initiate the upgrade. This stores the proposed WASM hash and sets a timelock deadline.
+2. **Wait**: The timelock period must elapse (24 hours from proposal).
+3. **Execute**: Admin calls `execute_upgrade(admin)` after the deadline. The contract emits a `contract_upgraded` event and updates the WASM via `Env::deployer().update_current_contract_wasm()`.
+4. **Cancel**: Admin may call `cancel_upgrade(admin)` at any point before execution to abort the upgrade.
+
+### Events
+
+| Event | Topics | Data |
+|-------|--------|------|
+| `upgrade_proposed` | `(admin, new_wasm_hash, deadline)` | - |
+| `contract_upgraded` | `(admin, new_wasm_hash)` | - |
+| `upgrade_cancelled` | `(admin, new_wasm_hash)` | - |
+
+### Error Codes
+
+| Code | Error | Description |
+|------|-------|-------------|
+| `18` | UpgradeNotApproved | Reserved for future use |
+| `19` | UpgradeTimelockPending | Attempted upgrade before timelock expiry |
+| `20` | NoPendingUpgrade | No upgrade proposal exists
