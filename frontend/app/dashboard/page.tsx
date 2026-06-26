@@ -18,7 +18,7 @@ import NoResultsState from "@/components/NoResultsState";
 import SectionCard from "@/components/SectionCard";
 import StatusPill from "@/components/StatusPill";
 import { useToast } from "@/components/ToastProvider";
-import { useNotifications } from "@/lib/notifications-context";
+import { useNotifications, getEventLabel } from "@/lib/notifications-context";
 import { formatDeadline, toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus, NotificationEvent } from "@/lib/types";
@@ -32,6 +32,15 @@ const STATUS_OPTIONS: JobStatus[] = [
   "Cancelled",
 ];
 
+const EVENT_DOT: Record<string, string> = {
+  job_accepted: "bg-blue-500",
+  work_submitted: "bg-amber-500",
+  work_approved: "bg-emerald-500",
+  job_cancelled: "bg-slate-500",
+  dispute_raised: "bg-red-500",
+  dispute_resolved: "bg-violet-500",
+};
+
 const STATUS_LABELS: Record<JobStatus, string> = {
   Open: "Open",
   InProgress: "In Progress",
@@ -44,7 +53,7 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 export default function DashboardPage() {
   const { wallet, connectWallet } = useWallet();
   const { showSuccess, showError } = useToast();
-  const { addNotification } = useNotifications();
+  const { notifications, addNotification } = useNotifications();
   const [allJobs, setAllJobs] = useState<Array<{ id: number; job: Job }>>([]);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "All">("All");
   const [loading, setLoading] = useState(false);
@@ -192,6 +201,35 @@ export default function DashboardPage() {
           <p className="text-xs text-slate-500">Your jobs on record</p>
         </div>
       </div>
+
+      {/* Activity Feed */}
+      {notifications.length > 0 && (
+        <SectionCard className="overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
+            <span className="text-xs text-slate-400">{notifications.length} event{notifications.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {notifications.slice(0, 10).map((n) => {
+              const dot = EVENT_DOT[n.event] ?? "bg-slate-400";
+              return (
+                <div
+                  key={n.id}
+                  className={`flex items-start gap-3 px-5 py-3 ${n.seen ? "" : "bg-blue-50/50"}`}
+                >
+                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-800">{n.message}</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {getEventLabel(n.event)} &middot; {new Date(n.timestamp).toLocaleDateString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
 
       <div
         className="flex flex-wrap gap-2"

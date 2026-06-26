@@ -1,6 +1,6 @@
 "use client";
 
-import { callContract, nativeToScVal } from "@/lib/stellar";
+import { callContract, nativeToScVal, xdr } from "@/lib/stellar";
 import type { Job } from "@/lib/types";
 
 export function hexToBytes(hex: string): Uint8Array {
@@ -113,10 +113,10 @@ export async function raiseDispute(caller: string, jobId: string) {
   ]);
 }
 
-export async function resolveDispute(jobId: string, winner: string) {
+export async function resolveDispute(jobId: string, clientBps: number) {
   return callContract(requireContractId(), "resolve_dispute", [
     nativeToScVal(jobId, { type: "u64" }),
-    nativeToScVal(winner, { type: "address" }),
+    xdr.ScVal.scvVec([nativeToScVal(clientBps, { type: "u32" })]),
   ]);
 }
 

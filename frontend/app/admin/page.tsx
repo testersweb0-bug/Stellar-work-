@@ -16,6 +16,15 @@ import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
 
+const TX_LOG_KEY = "stellarwork:admin-withdrawals";
+
+interface WithdrawalTx {
+  id: string;
+  amount: string;
+  timestamp: number;
+  status: "completed";
+}
+
 const STATUS_LABELS: Record<JobStatus, string> = {
   Open: "Open",
   InProgress: "In Progress",
@@ -35,6 +44,7 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalTx[]>([]);
 
   const fetchAdminData = useCallback(async (walletAddress: string) => {
     setLoading(true);
@@ -70,6 +80,27 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem(TX_LOG_KEY);
+        if (raw) setWithdrawals(JSON.parse(raw) as WithdrawalTx[]);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(TX_LOG_KEY, JSON.stringify(withdrawals));
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [withdrawals]);
+
+  useEffect(() => {
     if (wallet) {
       fetchAdminData(wallet);
     } else {
@@ -89,7 +120,15 @@ export default function AdminPage() {
     setSuccessMessage(null);
     try {
       await withdrawFees(nativeToken);
-      setSuccessMessage(`Successfully withdrew ${toXlm(fees)} XLM in fees.`);
+      const amount = toXlm(fees);
+      setSuccessMessage(`Successfully withdrew ${amount} XLM in fees.`);
+      const tx: WithdrawalTx = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        amount,
+        timestamp: Date.now(),
+        status: "completed",
+      };
+      setWithdrawals((prev) => [tx, ...prev].slice(0, 50));
       setFees(0n);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Withdraw failed.";
@@ -185,6 +224,37 @@ export default function AdminPage() {
           {withdrawing ? "Withdrawing..." : "Withdraw Fees"}
         </button>
       </SectionCard>
+
+      {withdrawals.length > 0 && (
+        <SectionCard title="Withdrawal History">
+          <div className="mt-2 divide-y divide-slate-100">
+            {withdrawals.slice(0, 10).map((tx) => (
+              <div key={tx.id} className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">{tx.amount} XLM</p>
+                  <p className="text-xs text-slate-400">
+                    {new Date(tx.timestamp).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  Completed
+                </span>
+              </div>
+            ))}
+          </div>
+          {withdrawals.length > 10 && (
+            <p className="mt-2 text-xs text-slate-400">
+              Showing 10 of {withdrawals.length} withdrawals
+            </p>
+          )}
+        </SectionCard>
+      )}
 
       <SectionCard title="Job Overview">
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">

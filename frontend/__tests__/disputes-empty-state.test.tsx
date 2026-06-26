@@ -1,6 +1,7 @@
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "@/components/ToastProvider";
 import DisputesPage from "@/app/disputes/page";
 
 const mockLoadDisputesPageData = vi.fn();
@@ -33,7 +34,7 @@ describe("Disputes page empty state", () => {
   });
 
   it("renders helpful empty-state copy and available CTA with zero disputes", async () => {
-    render(<DisputesPage />);
+    render(<ToastProvider><DisputesPage /></ToastProvider>);
 
     await waitFor(() =>
       expect(screen.queryByLabelText("Loading disputes")).not.toBeInTheDocument(),
