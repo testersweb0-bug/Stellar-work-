@@ -36,11 +36,24 @@ vi.mock("@/lib/contract", () => ({
   submitWork: vi.fn(),
   approveWork: vi.fn(),
   cancelJob: vi.fn(),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
+}));
+
+// Mock IPFS service
+vi.mock("@/lib/ipfs-service", () => ({
+  uploadToIpfs: vi.fn(),
+  fetchFromIpfs: vi.fn(),
 }));
 
 // Mock format utilities
 vi.mock("@/lib/format", () => ({
   toXlm: (value: string) => `${Number(value) / 10000000}`,
+  formatDeadline: (deadline: string) => {
+    if (deadline === "0") return undefined;
+    return { isPast: false, relative: "in 30 days", exact: "2025-07-26" };
+  },
 }));
 
 // Mock stellar utilities

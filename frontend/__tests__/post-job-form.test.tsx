@@ -9,6 +9,14 @@ const mockGetDescPayloadMax = vi.fn();
 vi.mock("@/lib/contract", () => ({
   getDescPayloadMax: (...args: unknown[]) => mockGetDescPayloadMax(...args),
   postJob: (...args: unknown[]) => mockPostJob(...args),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
+}));
+
+vi.mock("@/lib/ipfs-service", () => ({
+  uploadToIpfs: vi.fn(),
+  fetchFromIpfs: vi.fn(),
 }));
 
 vi.mock("@/lib/wallet-context", () => ({

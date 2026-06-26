@@ -1,6 +1,7 @@
 "use client";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import JobCardSkeleton from "@/components/JobCardSkeleton";
 import StatusPill from "@/components/StatusPill";
 import { getJob, getJobCount } from "@/lib/contract";
 import { toXlm } from "@/lib/format";
@@ -144,7 +145,26 @@ export default function ProfilePageClient({ address }: { address: string }) {
           onRetry={() => void fetchJobs()}
         />
       )}
-      {loading && <p className="text-sm text-slate-600">Loading job history...</p>}
+      {loading && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="animate-pulse rounded-lg border border-slate-200 bg-white p-4">
+                <div className="h-8 w-16 rounded bg-slate-200 mx-auto" />
+                <div className="mt-2 h-3 w-20 rounded bg-slate-200 mx-auto" />
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 animate-pulse">
+            <div className="h-6 w-28 rounded bg-slate-200" />
+            <div className="mt-3 space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-10 w-full rounded bg-slate-200" />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!loading && (
         <>

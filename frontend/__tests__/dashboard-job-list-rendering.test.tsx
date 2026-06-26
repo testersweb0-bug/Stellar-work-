@@ -19,6 +19,9 @@ vi.mock("@/lib/contract", () => ({
   cancelJob: (...args: unknown[]) => mockCancelJob(...args),
   submitWork: (...args: unknown[]) => mockSubmitWork(...args),
   enforceDeadline: (...args: unknown[]) => mockEnforceDeadline(...args),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
 }));
 
 vi.mock("@/lib/wallet-context", () => ({

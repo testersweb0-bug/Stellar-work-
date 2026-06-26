@@ -1,6 +1,7 @@
 "use client";
 
-import { getDescPayloadMax, postJob } from "@/lib/contract";
+import { getDescPayloadMax, postJob, storeDescriptionCid } from "@/lib/contract";
+import { uploadToIpfs } from "@/lib/ipfs-service";
 import ErrorBanner from "@/components/ErrorBanner";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
@@ -134,6 +135,7 @@ export default function PostJobPage() {
               : "0";
 
             localStorage.setItem(`job-desc:${hashHex}`, trimmedDescription);
+            const cid = await uploadToIpfs(trimmedDescription);
             const result = await postJob(
               wallet,
               amountStroops,
@@ -142,6 +144,13 @@ export default function PostJobPage() {
               deadlineUnix,
               tokenAddress.trim(),
             );
+            if (cid && !cid.startsWith("fallback:")) {
+              try {
+                await storeDescriptionCid(wallet, hashHex, cid);
+              } catch {
+                // CID storage is best-effort; description is still in localStorage
+              }
+            }
             if (result.hash) {
               setTxHash(result.hash);
             }

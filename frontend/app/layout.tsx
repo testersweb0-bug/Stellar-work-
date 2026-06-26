@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/ToastProvider";
 import { NotificationProvider } from "@/lib/notifications-context";
 import { Navigation } from "./navigation";
 import { ScrollRestorer } from "@/components/ScrollRestorer";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import CommandPalette from "@/components/CommandPalette";
 import Link from "next/link";
 import "./globals.css";
@@ -47,7 +48,9 @@ export default function RootLayout({
           <Navigation />
           <CommandPalette />
           <ScrollRestorer />
-          <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+          <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </main>
           <footer className="mt-auto border-t border-slate-200 bg-white py-8">
             <div className="mx-auto max-w-5xl px-4">
               <div className="flex flex-col items-center justify-between gap-6 md:flex-row">

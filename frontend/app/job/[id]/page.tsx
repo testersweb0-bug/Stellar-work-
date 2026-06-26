@@ -6,7 +6,8 @@ import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/components/ToastProvider";
 import StatusPill from "@/components/StatusPill";
 import { useNotifications } from "@/lib/notifications-context";
-import { acceptJob, approveWork, cancelJob, getJob, submitWork } from "@/lib/contract";
+import { acceptJob, approveWork, cancelJob, freelancerCancelJob, getDescriptionCid, getJob, submitWork } from "@/lib/contract";
+import { fetchFromIpfs } from "@/lib/ipfs-service";
 import { formatDeadline, toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import type { Job } from "@/lib/types";
@@ -29,6 +30,7 @@ export default function JobDetailPage() {
   const [latestTxHash, setLatestTxHash] = useState<string | null>(null);
   const [invalidId, setInvalidId] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [description, setDescription] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const numericId = Number(id);
@@ -42,10 +44,28 @@ export default function JobDetailPage() {
     }
     setFetching(true);
     setError(null);
+    setDescription(null);
     try {
       const data = await getJob(id);
       setJob(data);
-      if (!data) {
+      if (data) {
+        const hash = data.description_hash;
+        const stored = localStorage.getItem(`job-desc:${hash}`);
+        if (stored) {
+          setDescription(stored);
+        } else {
+          try {
+            const cid = await getDescriptionCid(hash);
+            if (cid) {
+              const text = await fetchFromIpfs(cid);
+              setDescription(text);
+              localStorage.setItem(`job-desc:${hash}`, text);
+            }
+          } catch {
+            setDescription(null);
+          }
+        }
+      } else {
         setError("Job not found.");
       }
     } catch (e) {
@@ -82,13 +102,8 @@ export default function JobDetailPage() {
   const canSubmit = Boolean(isFreelancer && job?.status === "InProgress");
   const canApprove = Boolean(isClient && job?.status === "SubmittedForReview");
   const canCancel = Boolean(isClient && job?.status === "Open");
-  const hasPrimaryActions = canAccept || canSubmit || canApprove || canCancel;
-
-  function getDescription(hash: string): string {
-    const stored = localStorage.getItem(`job-desc:${hash}`);
-    if (stored) return stored;
-    return "Description unavailable (posted from another device)";
-  }
+  const canFreelancerCancel = Boolean(isFreelancer && job?.status === "InProgress");
+  const hasPrimaryActions = canAccept || canSubmit || canApprove || canCancel || canFreelancerCancel;
 
   async function handleAction(
     action: () => Promise<{ hash?: string }>,
@@ -244,7 +259,8 @@ export default function JobDetailPage() {
           <strong>Amount:</strong> {toXlm(job.amount)} XLM
         </p>
         <p>
-          <strong>Description:</strong> {getDescription(job.description_hash)}
+          <strong>Description:</strong>{" "}
+          {description ?? localStorage.getItem(`job-desc:${job.description_hash}`) ?? "Description unavailable (posted from another device)"}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <p className="flex items-center gap-2">
@@ -350,6 +366,23 @@ export default function JobDetailPage() {
                   aria-haspopup="dialog"
                 >
                   <span className="block truncate">Cancel Job</span>
+                </button>
+              )}
+
+              {canFreelancerCancel && (
+                <button
+                  className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
+                  onClick={() => {
+                    if (!wallet) return;
+                    void handleAction(
+                      () => freelancerCancelJob(wallet, id),
+                      "Job cancelled. Full refund returned to client.",
+                    );
+                  }}
+                  disabled={loading}
+                  aria-busy={loading}
+                >
+                  <span className="block truncate">{loading ? "Processing..." : "Cancel as Freelancer"}</span>
                 </button>
               )}
             </div>

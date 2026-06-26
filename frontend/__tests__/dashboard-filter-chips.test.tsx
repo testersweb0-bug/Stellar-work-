@@ -10,6 +10,7 @@ const mockApproveWork = vi.fn();
 const mockCancelJob = vi.fn();
 const mockSubmitWork = vi.fn();
 const mockEnforceDeadline = vi.fn();
+const mockFreelancerCancelJob = vi.fn();
 
 vi.mock("@/lib/contract", () => ({
   getJob: (...args: unknown[]) => mockGetJob(...args),
@@ -19,6 +20,9 @@ vi.mock("@/lib/contract", () => ({
   cancelJob: (...args: unknown[]) => mockCancelJob(...args),
   submitWork: (...args: unknown[]) => mockSubmitWork(...args),
   enforceDeadline: (...args: unknown[]) => mockEnforceDeadline(...args),
+  freelancerCancelJob: (...args: unknown[]) => mockFreelancerCancelJob(...args),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
 }));
 
 vi.mock("@/lib/wallet-context", () => ({

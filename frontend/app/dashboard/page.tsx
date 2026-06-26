@@ -3,6 +3,7 @@
 import {
   approveWork,
   cancelJob,
+  freelancerCancelJob,
   getJob,
   getJobCount,
   getCompletedJobsCount,
@@ -503,6 +504,11 @@ function getActions(
         label: "Submit Work",
         fn: () => submitWork(wallet, jobId),
         notification: { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
+      });
+      actions.push({
+        label: "Cancel Job",
+        fn: () => freelancerCancelJob(wallet, jobId),
+        notification: null,
       });
     }
   }

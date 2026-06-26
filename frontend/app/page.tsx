@@ -6,7 +6,8 @@ import InfoTooltip from "@/components/InfoTooltip";
 import NoResultsState from "@/components/NoResultsState";
 import JobCardSkeleton from "@/components/JobCardSkeleton";
 import SectionCard from "@/components/SectionCard";
-import { acceptJob, getJob, getJobCount } from "@/lib/contract";
+import { acceptJob, getDescriptionCid, getJob, getJobCount } from "@/lib/contract";
+import { fetchFromIpfs } from "@/lib/ipfs-service";
 import { useNotifications } from "@/lib/notifications-context";
 import { formatDeadline, toXlm } from "@/lib/format";
 import {
@@ -55,6 +56,7 @@ export default function HomePage() {
   const seenJobIdsRef = useRef<Set<number>>(new Set());
   const isInitialLoadRef = useRef(true);
   const [viewMode, setViewMode] = useState<JobsViewMode>("grid");
+  const [descriptions, setDescriptions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setViewMode(readViewMode());
@@ -150,6 +152,27 @@ export default function HomePage() {
           item !== null && item.job.status === "Open",
       );
 
+      const descMap: Record<string, string> = {};
+      for (const { job } of fetched) {
+        const hash = job.description_hash;
+        const stored = localStorage.getItem(`job-desc:${hash}`);
+        if (stored) {
+          descMap[hash] = stored;
+          continue;
+        }
+        try {
+          const cid = await getDescriptionCid(hash);
+          if (cid) {
+            const text = await fetchFromIpfs(cid);
+            descMap[hash] = text;
+            localStorage.setItem(`job-desc:${hash}`, text);
+          }
+        } catch {
+          // IPFS fetch failed, description will show fallback text
+        }
+      }
+      setDescriptions(descMap);
+
       const incomingIds = fetched.map(({ id }) => id);
       if (!isInitialLoadRef.current) {
         const addedIds = incomingIds.filter((id) => !seenJobIdsRef.current.has(id));
@@ -215,6 +238,7 @@ export default function HomePage() {
   }, [lastAnnouncedSignature, loading, normalizedSearchTerm, showBookmarkedOnly, visibleJobs]);
 
   function getDescription(hash: string): string {
+    if (descriptions[hash]) return descriptions[hash];
     const stored = localStorage.getItem(`job-desc:${hash}`);
     if (stored) return stored;
     return "Description unavailable (posted from another device)";

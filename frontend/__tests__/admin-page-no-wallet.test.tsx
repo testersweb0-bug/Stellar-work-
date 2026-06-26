@@ -18,6 +18,9 @@ vi.mock("@/lib/contract", () => ({
   getJobCount: vi.fn(),
   getJob: vi.fn(),
   withdrawFees: vi.fn(),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
 }));
 
 // ── Tests ────────────────────────────────────────────────────────────────────

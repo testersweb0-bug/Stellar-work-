@@ -189,3 +189,29 @@ export async function getJobCount(): Promise<number> {
   );
   return Number(response.data ?? 0);
 }
+
+export async function freelancerCancelJob(freelancer: string, jobId: string) {
+  return callContract(requireContractId(), "freelancer_cancel_job", [
+    nativeToScVal(freelancer, { type: "address" }),
+    nativeToScVal(jobId, { type: "u64" }),
+  ]);
+}
+
+export async function storeDescriptionCid(caller: string, descHashHex: string, cid: string) {
+  return callContract(requireContractId(), "store_description_cid", [
+    nativeToScVal(caller, { type: "address" }),
+    nativeToScVal(hexToBytes(descHashHex), { type: "bytes" }),
+    nativeToScVal(cid, { type: "string" }),
+  ]);
+}
+
+export async function getDescriptionCid(descHashHex: string): Promise<string | null> {
+  const response = await callContract(
+    requireContractId(),
+    "get_description_cid",
+    [nativeToScVal(hexToBytes(descHashHex), { type: "bytes" })],
+    { readOnly: true },
+  );
+  const cid = response.data as string;
+  return cid || null;
+}

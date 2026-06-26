@@ -20,6 +20,9 @@ vi.mock("@/lib/contract", () => ({
   cancelJob: vi.fn(),
   submitWork: vi.fn(),
   enforceDeadline: vi.fn(),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
 }));
 
 vi.mock("@/components/ToastProvider", () => ({

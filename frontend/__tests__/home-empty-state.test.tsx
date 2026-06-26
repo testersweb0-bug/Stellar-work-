@@ -10,6 +10,14 @@ vi.mock("@/lib/contract", () => ({
   getJobCount: (...args: unknown[]) => mockGetJobCount(...args),
   getJob: (...args: unknown[]) => mockGetJob(...args),
   acceptJob: vi.fn(),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
+}));
+
+vi.mock("@/lib/ipfs-service", () => ({
+  uploadToIpfs: vi.fn(),
+  fetchFromIpfs: vi.fn(),
 }));
 
 vi.mock("@/lib/wallet-context", () => ({

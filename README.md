@@ -15,16 +15,34 @@ stellarwork
 
 ### Using Docker (Recommended)
 
-You can spin up the frontend development environment with a single command (requires Docker installed):
+You can spin up the full development environment with a single command (requires Docker installed):
 
 ```bash
-cd frontend
-cp .env.example .env.local
-cd ..
-docker compose up
+cp frontend/.env.example frontend/.env.local
+docker compose up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000). File changes in `frontend/` will trigger hot-reload inside the container automatically.
+This starts:
+- **frontend** — Next.js dev server at [http://localhost:3000](http://localhost:3000) with hot-reload
+- **contract-builder** — Rust + Soroban CLI environment for building/testing contracts
+- **stellar-quickstart** — Local Stellar dev network with Soroban RPC at [http://localhost:8000](http://localhost:8000)
+
+File changes in `frontend/` will trigger hot-reload inside the container automatically.
+
+To run contract tests inside the container:
+
+```bash
+docker compose exec contract-builder cargo test --manifest-path contracts/escrow/Cargo.toml
+```
+
+Common commands are also available via Makefile:
+
+```bash
+make up      # Start all services
+make down    # Stop all services
+make test-contract  # Run contract unit tests
+make test-frontend  # Run frontend unit tests
+```
 
 ### Manual Setup
 
@@ -170,10 +188,12 @@ soroban contract invoke \
 ## Current Feature Set
 
 - Core escrow lifecycle (`post_job`, `accept_job`, `submit_work`, `approve_work`, `cancel_job`)
+- Freelancer-initiated job cancellation with penalty (`freelancer_cancel_job`)
 - On-chain job storage and count queries
+- IPFS-based job description storage via web3.storage (with localStorage fallback)
 - Platform fee accounting (2.5%)
 - Contract unit tests for core paths
-- Core pages: `/`, `/post-job`, `/job/[id]`
+- Core pages: `/`, `/post-job`, `/job/[id]`, `/dashboard`, `/admin`, `/disputes`, `/profile/[address]`
 
 For a command-only deployment reference, see `docs/testnet-deployment-guide.md`.
 For environment configuration, see `docs/environments.md`.

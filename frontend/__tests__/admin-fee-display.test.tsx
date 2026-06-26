@@ -20,6 +20,9 @@ vi.mock("@/lib/contract", () => ({
   getJobCount: (...args: unknown[]) => mockGetJobCount(...args),
   getJob: (...args: unknown[]) => mockGetJob(...args),
   withdrawFees: (...args: unknown[]) => mockWithdrawFees(...args),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
 }));
 
 // The admin gate uses the wallet address; keep it mutable so a re-render can

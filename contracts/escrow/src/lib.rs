@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, BytesN,
-    Env, Symbol, Vec,
+    Env, String, Symbol, Vec,
 };
 
 const DEFAULT_FEE_BPS: i128 = 250;
@@ -76,6 +76,7 @@ pub enum DataKey {
     MaxActiveJobsPerClient,
     PendingUpgradeWasmHash,
     PendingUpgradeDeadline,
+    DescriptionCidMapping(BytesN<32>),
 }
 
 #[contracterror]
@@ -329,6 +330,30 @@ impl EscrowContract {
 
         e.events()
             .publish((Symbol::new(&e, "job_cancelled"),), (job_id, client));
+    }
+
+    pub fn freelancer_cancel_job(e: Env, freelancer: Address, job_id: u64) {
+        let mut job = get_job_or_panic(&e, job_id);
+        freelancer.require_auth();
+
+        if job.status != JobStatus::InProgress {
+            panic_with_error!(&e, Error::InvalidStatus);
+        }
+        if job.freelancer != Option::Some(freelancer.clone()) {
+            panic_with_error!(&e, Error::Unauthorized);
+        }
+
+        job.status = JobStatus::Cancelled;
+        set_job(&e, job_id, &job);
+        bump_instance_ttl(&e);
+
+        let token_client = token::Client::new(&e, &job.token);
+        token_client.transfer(&e.current_contract_address(), &job.client, &job.amount);
+
+        e.events().publish(
+            (Symbol::new(&e, "job_freelancer_cancelled"),),
+            (job_id, freelancer, job.client, job.amount),
+        );
     }
 
     pub fn enforce_deadline(e: Env, client: Address, job_id: u64) {
@@ -628,6 +653,29 @@ impl EscrowContract {
 
     pub fn get_native_token(e: Env) -> Address {
         load_native_token(&e)
+    }
+
+    pub fn store_description_cid(e: Env, caller: Address, desc_hash: BytesN<32>, cid: String) {
+        caller.require_auth();
+        if cid.is_empty() {
+            panic_with_error!(&e, Error::InvalidDescriptionHash);
+        }
+        e.storage()
+            .persistent()
+            .set(&DataKey::DescriptionCidMapping(desc_hash.clone()), &cid);
+        e.storage().persistent().extend_ttl(
+            &DataKey::DescriptionCidMapping(desc_hash),
+            ACTIVE_JOB_LIFETIME_THRESHOLD,
+            INSTANCE_BUMP_AMOUNT,
+        );
+        bump_instance_ttl(&e);
+    }
+
+    pub fn get_description_cid(e: Env, desc_hash: BytesN<32>) -> String {
+        e.storage()
+            .persistent()
+            .get::<DataKey, String>(&DataKey::DescriptionCidMapping(desc_hash))
+            .unwrap_or(String::from_str(&e, ""))
     }
 
     pub fn get_contract_version(_e: Env) -> u32 {
@@ -1000,7 +1048,7 @@ mod test {
 
     use super::*;
     use soroban_sdk::testutils::{Address as _, Events, Ledger};
-    use soroban_sdk::{Address, BytesN, Env, Vec};
+    use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
     fn setup() -> (
         Env,
@@ -4333,6 +4381,164 @@ mod test {
         client.raise_dispute(&freelancer, &job_id);
         // A second raise_dispute on the same Disputed job must panic.
         client.raise_dispute(&user, &job_id);
+    }
+
+    // ── freelancer_cancel_job tests ────────────────────────────────────────────
+
+    #[test]
+    fn freelancer_cancel_job_full_refund_to_client() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let client_pre = token_client.balance(&user);
+
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        assert_eq!(client.get_job(&job_id).status, JobStatus::InProgress);
+
+        client.freelancer_cancel_job(&freelancer, &job_id);
+
+        let client_post = token_client.balance(&user);
+        assert_eq!(client_post, client_pre);
+        assert_eq!(client.get_job(&job_id).status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn freelancer_cancel_job_in_progress_status_required() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        // Status is Open, not InProgress
+        client.freelancer_cancel_job(&freelancer, &job_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn freelancer_cancel_job_only_assigned_freelancer() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        let stranger = Address::generate(&env);
+        client.freelancer_cancel_job(&stranger, &job_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn freelancer_cancel_job_on_submitted_for_review_fails() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.freelancer_cancel_job(&freelancer, &job_id);
+    }
+
+    #[test]
+    fn freelancer_cancel_job_event_emitted() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let events_before = env.events().all().len();
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        client.freelancer_cancel_job(&freelancer, &job_id);
+
+        let events_after = env.events().all().len();
+        assert!(
+            events_after > events_before,
+            "freelancer cancel must emit events"
+        );
+    }
+
+    #[test]
+    fn freelancer_cancel_job_penalty_forfeit_full_refund() {
+        let (env, client, _, user, freelancer, native_token) = setup();
+        let token_client = token::Client::new(&env, &native_token);
+        let freelancer_pre = token_client.balance(&freelancer);
+
+        let job_id = client.post_job(
+            &user,
+            &1_000_000i128,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id);
+        client.freelancer_cancel_job(&freelancer, &job_id);
+
+        // Freelancer forfeits payment — balance stays unchanged
+        let freelancer_post = token_client.balance(&freelancer);
+        assert_eq!(freelancer_post, freelancer_pre);
+        assert_eq!(client.get_job(&job_id).status, JobStatus::Cancelled);
+    }
+
+    // ── description_cid storage tests ─────────────────────────────────────────
+
+    #[test]
+    fn store_and_get_description_cid_round_trip() {
+        let (env, client, _, user, _, _) = setup();
+        let desc_hash = BytesN::from_array(&env, &[0xAB; 32]);
+        let cid = String::from_str(&env, "QmTest123456789CIDValue");
+
+        client.store_description_cid(&user, &desc_hash, &cid);
+
+        let retrieved = client.get_description_cid(&desc_hash);
+        assert_eq!(retrieved, cid);
+    }
+
+    #[test]
+    fn get_description_cid_empty_for_unstored_hash() {
+        let (env, client, _, _, _, _) = setup();
+        let desc_hash = BytesN::from_array(&env, &[0xAB; 32]);
+
+        let retrieved = client.get_description_cid(&desc_hash);
+        assert_eq!(retrieved, String::from_str(&env, ""));
+    }
+
+    #[test]
+    fn store_description_cid_updates_existing() {
+        let (env, client, _, user, _, _) = setup();
+        let desc_hash = BytesN::from_array(&env, &[0xAB; 32]);
+        let cid1 = String::from_str(&env, "QmFirstCID123456789");
+        let cid2 = String::from_str(&env, "QmSecondCID987654321");
+
+        client.store_description_cid(&user, &desc_hash, &cid1);
+        client.store_description_cid(&user, &desc_hash, &cid2);
+
+        let retrieved = client.get_description_cid(&desc_hash);
+        assert_eq!(retrieved, cid2);
     }
 
     /// After a failed raise_dispute call, the job state and escrow balance
