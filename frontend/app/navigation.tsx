@@ -6,6 +6,7 @@ import { useWallet, WalletButton } from "@/lib/wallet-context";
 import { useState, useEffect, useRef } from "react";
 import NetworkBadge from "@/components/NetworkBadge";
 import NotificationInbox from "@/components/NotificationInbox";
+import WalletMenu from "@/components/WalletMenu";
 
 export function Navigation() {
   const pathname = usePathname();
@@ -15,6 +16,11 @@ export function Navigation() {
   const menuRef = useRef<HTMLDivElement>(null);
   const firstLinkRef = useRef<HTMLAnchorElement>(null);
   const lastLinkRef = useRef<HTMLAnchorElement>(null);
+
+  // Close menu on route change
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
 
   // Handle Escape key to close menu
   useEffect(() => {
@@ -31,44 +37,45 @@ export function Navigation() {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [menuOpen]);
 
-  // Focus management when menu opens/closes
+  // Focus management when menu opens
   useEffect(() => {
     if (menuOpen) {
       firstLinkRef.current?.focus();
     }
   }, [menuOpen]);
 
-  // Focus trap within menu
+  // Focus trap within mobile menu
   const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const links = menuRef.current?.querySelectorAll("a");
-    if (!links || links.length === 0) return;
+    const focusable = menuRef.current?.querySelectorAll<HTMLElement>(
+      "a, button:not([disabled])",
+    );
+    if (!focusable || focusable.length === 0) return;
 
-    const firstLink = links[0] as HTMLAnchorElement;
-    const lastLink = links[links.length - 1] as HTMLAnchorElement;
-    const currentIndex = Array.from(links).indexOf(document.activeElement as HTMLAnchorElement);
+    const items = Array.from(focusable);
+    const firstItem = items[0];
+    const lastItem = items[items.length - 1];
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
 
     if (event.key === "Tab") {
       if (event.shiftKey) {
-        // Shift + Tab
-        if (document.activeElement === firstLink) {
+        if (document.activeElement === firstItem) {
           event.preventDefault();
-          lastLink.focus();
+          lastItem.focus();
         }
       } else {
-        // Tab
-        if (document.activeElement === lastLink) {
+        if (document.activeElement === lastItem) {
           event.preventDefault();
-          firstLink.focus();
+          firstItem.focus();
         }
       }
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      const nextIndex = currentIndex < links.length - 1 ? currentIndex + 1 : 0;
-      (links[nextIndex] as HTMLAnchorElement).focus();
+      const nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
+      items[nextIndex]?.focus();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      const prevIndex = currentIndex > 0 ? currentIndex - 1 : links.length - 1;
-      (links[prevIndex] as HTMLAnchorElement).focus();
+      const prevIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
+      items[prevIndex]?.focus();
     }
   };
 
@@ -99,12 +106,7 @@ export function Navigation() {
   return (
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4">
-        <Link href="/" className="shrink-0 text-lg font-semibold">
-          StellarWork
-        </Link>
-        <kbd className="hidden rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 lg:inline-block">
-          ⌘K
-        </kbd>
+        {/* Logo + network badge */}
         <div className="flex min-w-0 items-center gap-3">
           <Link href="/" className="shrink-0 text-lg font-semibold">
             StellarWork
@@ -112,13 +114,18 @@ export function Navigation() {
           <NetworkBadge />
         </div>
 
+        {/* ⌘K hint — desktop only */}
+        <kbd className="hidden rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 lg:inline-block">
+          ⌘K
+        </kbd>
+
+        {/* Desktop nav */}
         <div className="hidden min-w-0 items-center gap-4 lg:flex">
           <nav
             aria-label="Main navigation"
             className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm"
           >
-              {links.map(({ href, label, shortcut }) => (
-            {links.map(({ href, label }) => (
+            {links.map(({ href, label, shortcut }) => (
               <Link
                 key={href}
                 href={href}
@@ -127,7 +134,8 @@ export function Navigation() {
                     ? "font-semibold text-slate-900"
                     : "text-slate-600 hover:text-slate-900"
                 }
-                aria-label={`${label}${shortcut ? ` (shortcut: ${shortcut})` : ""}`}
+                aria-label={shortcut ? `${label} (shortcut: ${shortcut})` : label}
+                aria-current={isActive(href) ? "page" : undefined}
               >
                 {label}
                 {shortcut && (
@@ -138,22 +146,28 @@ export function Navigation() {
               </Link>
             ))}
           </nav>
+
           <NotificationInbox />
-          <WalletButton />
+
+          {/* WalletMenu provides disconnect + account switcher in desktop nav */}
+          <WalletMenu />
         </div>
 
+        {/* Mobile hamburger */}
         <button
           ref={menuButtonRef}
           className="rounded-md p-2 text-slate-700 hover:bg-slate-100 lg:hidden"
-          onClick={() => setMenuOpen(!menuOpen)}
+          onClick={() => setMenuOpen((prev) => !prev)}
           aria-label="Toggle navigation menu"
           aria-expanded={menuOpen}
+          aria-controls="mobile-nav-menu"
         >
           <svg
             className="h-6 w-6"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
+            aria-hidden="true"
           >
             {menuOpen ? (
               <path
@@ -174,26 +188,33 @@ export function Navigation() {
         </button>
       </div>
 
+      {/* Mobile menu drawer */}
       {menuOpen && (
         <div
+          id="mobile-nav-menu"
           ref={menuRef}
           className="border-t border-slate-200 px-4 py-3 lg:hidden"
           onKeyDown={handleMenuKeyDown}
         >
           <nav aria-label="Main navigation" className="flex flex-col gap-2 text-sm">
-             {links.map(({ href, label, shortcut }) => (
-            {links.map(({ href, label }, index) => (
+            {links.map(({ href, label, shortcut }, index) => (
               <Link
                 key={href}
-                ref={index === 0 ? firstLinkRef : index === links.length - 1 ? lastLinkRef : undefined}
+                ref={
+                  index === 0
+                    ? firstLinkRef
+                    : index === links.length - 1
+                      ? lastLinkRef
+                      : undefined
+                }
                 href={href}
                 className={
                   isActive(href)
                     ? "rounded-md bg-slate-100 px-2 py-1 font-semibold text-slate-900"
                     : "rounded-md px-2 py-1 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }
-                onClick={() => setMenuOpen(false)}
-                aria-label={`${label}${shortcut ? ` (shortcut: ${shortcut})` : ""}`}
+                aria-current={isActive(href) ? "page" : undefined}
+                aria-label={shortcut ? `${label} (shortcut: ${shortcut})` : label}
                 onClick={() => {
                   setMenuOpen(false);
                   menuButtonRef.current?.focus();
@@ -208,6 +229,8 @@ export function Navigation() {
               </Link>
             ))}
           </nav>
+
+          {/* WalletButton in mobile drawer — simpler connect/disconnect UI */}
           <div className="mt-3 border-t border-slate-100 pt-3">
             <WalletButton />
           </div>

@@ -7,11 +7,13 @@ import {
   getNativeToken,
   withdrawFees,
 } from "@/lib/contract";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
 import StatusPill from "@/components/StatusPill";
 import SectionCard from "@/components/SectionCard";
 import { formatDeadline, toXlm } from "@/lib/format";
+import { isConfirmSuppressed, CONFIRM_KEYS } from "@/lib/confirm-prefs";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
@@ -45,6 +47,7 @@ export default function AdminPage() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [withdrawals, setWithdrawals] = useState<WithdrawalTx[]>([]);
+  const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
 
   const fetchAdminData = useCallback(async (walletAddress: string) => {
     setLoading(true);
@@ -115,6 +118,7 @@ export default function AdminPage() {
 
   const handleWithdraw = async () => {
     if (!nativeToken) return;
+    setShowWithdrawConfirm(false);
     setWithdrawing(true);
     setError(null);
     setSuccessMessage(null);
@@ -219,11 +223,38 @@ export default function AdminPage() {
         <button
           disabled={withdrawing || fees <= 0n}
           className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-          onClick={handleWithdraw}
+          onClick={() => {
+            if (isConfirmSuppressed(CONFIRM_KEYS.withdrawFees)) {
+              void handleWithdraw();
+            } else {
+              setShowWithdrawConfirm(true);
+            }
+          }}
+          aria-haspopup="dialog"
         >
           {withdrawing ? "Withdrawing..." : "Withdraw Fees"}
         </button>
       </SectionCard>
+
+      {showWithdrawConfirm && (
+        <ConfirmDialog
+          open={true}
+          title="Withdraw all platform fees?"
+          description="This will transfer all accrued platform fees to your admin wallet. The fee balance will be reset to zero."
+          consequences={[
+            "All accrued fees will be swept to the admin wallet immediately.",
+            "The on-chain fee balance will be reset to 0.",
+            "This action cannot be reversed.",
+          ]}
+          impactLine={`${toXlm(fees)} XLM will be transferred to your wallet`}
+          confirmLabel="Yes, withdraw fees"
+          variant="primary"
+          loading={withdrawing}
+          suppressKey={CONFIRM_KEYS.withdrawFees}
+          onConfirm={() => void handleWithdraw()}
+          onCancel={() => setShowWithdrawConfirm(false)}
+        />
+      )}
 
       {withdrawals.length > 0 && (
         <SectionCard title="Withdrawal History">

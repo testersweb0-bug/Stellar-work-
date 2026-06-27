@@ -9,6 +9,7 @@ Index of project documentation. Start with the [root README](../README.md) for s
 | [contributor-onboarding-checklist.md](./contributor-onboarding-checklist.md) | First-time contributor setup and first PR checklist |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Branching, PR requirements, labels, and pre-commit hooks |
 | [glossary.md](./glossary.md) | Contract and frontend terminology |
+| [VIDEO_TUTORIALS.md](./VIDEO_TUTORIALS.md) | Screencast recording guide, script template, official tutorial series outline, and captioning standards |
 
 ## Architecture & Contracts
 
@@ -25,13 +26,17 @@ Index of project documentation. Start with the [root README](../README.md) for s
 
 | Document | Description |
 |----------|-------------|
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | Full production deployment guide: contract, frontend, DNS, SSL, and post-deploy verification |
 | [DEPLOY.md](./DEPLOY.md) | Vercel deployment setup, preview deployments, secrets, and environment variables |
 | [environments.md](./environments.md) | Environment variables and target networks |
+| [testnet-deployment-guide.md](./testnet-deployment-guide.md) | Deploy escrow to Stellar testnet |
 
 ## Operations & Quality
 
 | Document | Description |
 |----------|-------------|
+| [OPS_RUNBOOK.md](./OPS_RUNBOOK.md) | Operations runbook: monitoring, backups, incident response, contract upgrades, and maintenance |
+| [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md) | Pre-launch checklist covering code, infrastructure, contract deploy, E2E verification, and sign-off |
 | [testing-matrix.md](./testing-matrix.md) | Unit, integration, and E2E test coverage and commands |
 | [release-checklist.md](./release-checklist.md) | Pre-release verification steps |
 | [release-notes-guide.md](./release-notes-guide.md) | How to write release notes entries |

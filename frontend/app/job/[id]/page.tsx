@@ -1,6 +1,6 @@
 "use client";
 
-import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import InfoTooltip from "@/components/InfoTooltip";
 import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/components/ToastProvider";
@@ -10,11 +10,14 @@ import { acceptJob, approveWork, cancelJob, freelancerCancelJob, getDescriptionC
 import { fetchFromIpfs } from "@/lib/ipfs-service";
 import { formatDeadline, toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
+import { isConfirmSuppressed, CONFIRM_KEYS } from "@/lib/confirm-prefs";
 import type { Job } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+
+type PendingAction = "cancelJob" | "approveWork" | "submitWork" | "freelancerCancelJob";
 
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
@@ -25,7 +28,7 @@ export default function JobDetailPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [fetching, setFetching] = useState(true);
   const [latestTxHash, setLatestTxHash] = useState<string | null>(null);
   const [invalidId, setInvalidId] = useState(false);
@@ -84,7 +87,7 @@ export default function JobDetailPage() {
     if (!wallet) {
       setError(null);
       setLatestTxHash(null);
-      setShowCancelConfirm(false);
+      setPendingAction(null);
     }
   }, [wallet]);
 
@@ -138,17 +141,53 @@ export default function JobDetailPage() {
     }
   }
 
-  async function handleConfirmCancel() {
-    if (!wallet) {
-      showError("Connect your wallet to run this action.");
-      return;
+  /** Request a confirmed action. If the user has suppressed the dialog, execute immediately. */
+  function requestAction(action: PendingAction) {
+    const keyMap: Record<PendingAction, string> = {
+      cancelJob: CONFIRM_KEYS.cancelJob,
+      approveWork: CONFIRM_KEYS.approveWork,
+      submitWork: CONFIRM_KEYS.submitWork,
+      freelancerCancelJob: CONFIRM_KEYS.freelancerCancelJob,
+    };
+    if (isConfirmSuppressed(keyMap[action])) {
+      void executeAction(action);
+    } else {
+      setPendingAction(action);
     }
-    await handleAction(
-      () => cancelJob(wallet, id),
-      "Job cancelled and funds refunded.",
-      { event: "job_cancelled", message: `Job #${id} was cancelled and funds refunded.` },
-    );
-    setShowCancelConfirm(false);
+  }
+
+  async function executeAction(action: PendingAction) {
+    setPendingAction(null);
+    if (!wallet) return;
+    switch (action) {
+      case "cancelJob":
+        await handleAction(
+          () => cancelJob(wallet, id),
+          "Job cancelled and funds refunded.",
+          { event: "job_cancelled", message: `Job #${id} was cancelled and funds refunded.` },
+        );
+        break;
+      case "approveWork":
+        await handleAction(
+          () => approveWork(wallet, id),
+          "Work approved and payment released.",
+          { event: "work_approved", message: `Work for Job #${id} was approved and payment released.` },
+        );
+        break;
+      case "submitWork":
+        await handleAction(
+          () => submitWork(wallet, id),
+          "Work submitted for review.",
+          { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
+        );
+        break;
+      case "freelancerCancelJob":
+        await handleAction(
+          () => freelancerCancelJob(wallet, id),
+          "Job cancelled. Full refund returned to client.",
+        );
+        break;
+    }
   }
 
   async function copyToClipboard(text: string) {
@@ -166,6 +205,75 @@ export default function JobDetailPage() {
       console.error("Failed to copy!", err);
     }
   }
+
+  // ── Confirm dialog configs ──────────────────────────────────────────────
+
+  const amountXlm = job ? `${toXlm(job.amount)} XLM` : "";
+
+  const DIALOG_CONFIG: Record<
+    PendingAction,
+    {
+      title: string;
+      description: string;
+      consequences?: string[];
+      impactLine?: string;
+      confirmLabel: string;
+      variant: "danger" | "warning" | "primary";
+      suppressKey: (typeof CONFIRM_KEYS)[keyof typeof CONFIRM_KEYS];
+    }
+  > = {
+    cancelJob: {
+      title: "Cancel this job?",
+      description: "Cancelling will close the job and return the escrowed funds to your wallet. This action cannot be undone.",
+      consequences: [
+        "The job will move to Cancelled status permanently.",
+        "The freelancer (if any) will lose access to the job.",
+      ],
+      impactLine: `${amountXlm} will be refunded to your wallet`,
+      confirmLabel: "Yes, cancel job",
+      variant: "danger",
+      suppressKey: CONFIRM_KEYS.cancelJob,
+    },
+    approveWork: {
+      title: "Approve and release payment?",
+      description: "Approving the submitted work releases the escrowed funds to the freelancer minus the platform fee. This action is final and cannot be reversed.",
+      consequences: [
+        "The job will move to Completed status permanently.",
+        "You will not be able to request changes after approval.",
+        "Platform fee (2.5%) will be deducted before transfer.",
+      ],
+      impactLine: `${amountXlm} (minus 2.5% fee) will be released to the freelancer`,
+      confirmLabel: "Yes, approve & pay",
+      variant: "primary",
+      suppressKey: CONFIRM_KEYS.approveWork,
+    },
+    submitWork: {
+      title: "Submit work for review?",
+      description: "Submitting notifies the client that your work is ready for review. This action cannot be undone — you will not be able to make further changes until the client responds.",
+      consequences: [
+        "The job will move to Submitted for Review status.",
+        "The client will be able to approve or raise a dispute.",
+      ],
+      confirmLabel: "Yes, submit work",
+      variant: "warning",
+      suppressKey: CONFIRM_KEYS.submitWork,
+    },
+    freelancerCancelJob: {
+      title: "Cancel this job?",
+      description: "Cancelling as a freelancer will return the full escrowed amount to the client. This action cannot be undone.",
+      consequences: [
+        "The job will move to Cancelled status permanently.",
+        "The full escrow amount is refunded to the client.",
+        "Your reputation may be affected.",
+      ],
+      impactLine: `${amountXlm} will be refunded to the client`,
+      confirmLabel: "Yes, cancel job",
+      variant: "danger",
+      suppressKey: CONFIRM_KEYS.freelancerCancelJob,
+    },
+  };
+
+  // ── Render ──────────────────────────────────────────────────────────────
 
   if (invalidId) {
     return (
@@ -315,18 +423,16 @@ export default function JobDetailPage() {
 
       {hasPrimaryActions && (
         <>
-          {/* Spacer to prevent content from being hidden behind sticky footer on mobile */}
+          {/* Spacer on mobile to prevent content hiding behind sticky footer */}
           <div className="h-20 sm:hidden" aria-hidden="true" />
-          
+
           <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:pb-0 sm:shadow-none sm:backdrop-blur-none">
             <div className="mx-auto flex w-full max-w-4xl flex-wrap gap-2 sm:justify-end">
               {canAccept && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 sm:flex-none sm:max-w-48 sm:py-2"
                   onClick={() => {
-                    if (!wallet) {
-                      return;
-                    }
+                    if (!wallet) return;
                     void handleAction(
                       () => acceptJob(wallet, id),
                       "Job accepted successfully.",
@@ -344,12 +450,9 @@ export default function JobDetailPage() {
               {canSubmit && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
-                  onClick={() => handleAction(
-                    () => submitWork(wallet!, id),
-                    "Work submitted for review.",
-                    { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
-                  )}
+                  onClick={() => requestAction("submitWork")}
                   disabled={loading}
+                  aria-haspopup="dialog"
                   aria-busy={loading}
                 >
                   <span className="block truncate">{loading ? "Processing..." : "Submit Work"}</span>
@@ -359,12 +462,9 @@ export default function JobDetailPage() {
               {canApprove && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
-                  onClick={() => handleAction(
-                    () => approveWork(wallet!, id),
-                    "Work approved and payment released.",
-                    { event: "work_approved", message: `Work for Job #${id} was approved and payment released.` },
-                  )}
+                  onClick={() => requestAction("approveWork")}
                   disabled={loading}
+                  aria-haspopup="dialog"
                   aria-busy={loading}
                 >
                   <span className="block truncate">{loading ? "Processing..." : "Approve Work"}</span>
@@ -374,7 +474,7 @@ export default function JobDetailPage() {
               {canCancel && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
-                  onClick={() => setShowCancelConfirm(true)}
+                  onClick={() => requestAction("cancelJob")}
                   disabled={loading}
                   aria-haspopup="dialog"
                 >
@@ -385,14 +485,9 @@ export default function JobDetailPage() {
               {canFreelancerCancel && (
                 <button
                   className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
-                  onClick={() => {
-                    if (!wallet) return;
-                    void handleAction(
-                      () => freelancerCancelJob(wallet, id),
-                      "Job cancelled. Full refund returned to client.",
-                    );
-                  }}
+                  onClick={() => requestAction("freelancerCancelJob")}
                   disabled={loading}
+                  aria-haspopup="dialog"
                   aria-busy={loading}
                 >
                   <span className="block truncate">{loading ? "Processing..." : "Cancel as Freelancer"}</span>
@@ -403,14 +498,14 @@ export default function JobDetailPage() {
         </>
       )}
 
-      {showCancelConfirm && (
-        <CancelJobConfirmModal
-          jobId={id}
+      {/* Confirmation dialogs */}
+      {pendingAction && (
+        <ConfirmDialog
+          open={pendingAction !== null}
+          {...DIALOG_CONFIG[pendingAction]}
           loading={loading}
-          onClose={() => setShowCancelConfirm(false)}
-          onConfirm={() => {
-            void handleConfirmCancel();
-          }}
+          onConfirm={() => void executeAction(pendingAction)}
+          onCancel={() => setPendingAction(null)}
         />
       )}
     </section>

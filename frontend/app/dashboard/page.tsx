@@ -10,7 +10,7 @@ import {
   submitWork,
   enforceDeadline,
 } from "@/lib/contract";
-import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
 import ExportButton from "@/components/ExportButton";
@@ -22,9 +22,16 @@ import StatusPill from "@/components/StatusPill";
 import { useToast } from "@/components/ToastProvider";
 import { useNotifications, getEventLabel } from "@/lib/notifications-context";
 import { formatDeadline, toXlm } from "@/lib/format";
+import { isConfirmSuppressed, CONFIRM_KEYS } from "@/lib/confirm-prefs";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus, NotificationEvent } from "@/lib/types";
 import { useEffect, useState, useCallback, useRef, type KeyboardEvent } from "react";
+
+type PendingDashAction = {
+  type: "cancelJob" | "approveWork" | "submitWork" | "freelancerCancelJob";
+  jobId: number;
+  amountXlm: string;
+};
 
 const STATUS_OPTIONS: JobStatus[] = [
   "Open",
@@ -61,7 +68,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
-  const [pendingCancelJobId, setPendingCancelJobId] = useState<number | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingDashAction | null>(null);
   const [completedJobsCount, setCompletedJobsCount] = useState<number | null>(null);
   const filterOptions: Array<JobStatus | "All"> = ["All", ...STATUS_OPTIONS];
   const filterButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -129,17 +136,88 @@ export default function DashboardPage() {
   };
 
   const handleConfirmCancel = async () => {
-    if (!wallet || pendingCancelJobId === null) {
-      return;
+    if (!wallet || pendingAction === null) return;
+    const jobId = pendingAction.jobId;
+    const type = pendingAction.type;
+    setPendingAction(null);
+    if (type === "cancelJob") {
+      await handleAction(
+        () => cancelJob(wallet, String(jobId)),
+        jobId,
+        { event: "job_cancelled", message: `Job #${jobId} was cancelled and funds refunded.` },
+      );
+    } else if (type === "approveWork") {
+      await handleAction(
+        () => approveWork(wallet, String(jobId)),
+        jobId,
+        { event: "work_approved", message: `Work for Job #${jobId} was approved and payment released.` },
+      );
+    } else if (type === "submitWork") {
+      await handleAction(
+        () => submitWork(wallet, String(jobId)),
+        jobId,
+        { event: "work_submitted", message: `Work for Job #${jobId} was submitted for review.` },
+      );
+    } else if (type === "freelancerCancelJob") {
+      await handleAction(
+        () => freelancerCancelJob(wallet, String(jobId)),
+        jobId,
+        null,
+      );
     }
-    const jobId = pendingCancelJobId;
-    await handleAction(
-      () => cancelJob(wallet, String(jobId)),
-      jobId,
-      { event: "job_cancelled", message: `Job #${jobId} was cancelled and funds refunded.` },
-    );
-    setPendingCancelJobId(null);
   };
+
+  /** Request a confirmed action. Skips the dialog if the user previously chose "Don't show again". */
+  const requestDashAction = useCallback((
+    type: PendingDashAction["type"],
+    jobId: number,
+    amountXlm: string,
+  ) => {
+    const keyMap: Record<PendingDashAction["type"], string> = {
+      cancelJob: CONFIRM_KEYS.cancelJob,
+      approveWork: CONFIRM_KEYS.approveWork,
+      submitWork: CONFIRM_KEYS.submitWork,
+      freelancerCancelJob: CONFIRM_KEYS.freelancerCancelJob,
+    };
+    if (isConfirmSuppressed(keyMap[type])) {
+      // Execute directly without dialog
+      const pending: PendingDashAction = { type, jobId, amountXlm };
+      setPendingAction(pending);
+      // Trigger confirm immediately by calling handleConfirmCancel after state flush
+      // We do this via a synthetic pending that handleConfirmCancel reads
+      void (async () => {
+        if (!wallet) return;
+        if (type === "cancelJob") {
+          await handleAction(
+            () => cancelJob(wallet, String(jobId)),
+            jobId,
+            { event: "job_cancelled", message: `Job #${jobId} was cancelled and funds refunded.` },
+          );
+        } else if (type === "approveWork") {
+          await handleAction(
+            () => approveWork(wallet, String(jobId)),
+            jobId,
+            { event: "work_approved", message: `Work for Job #${jobId} was approved and payment released.` },
+          );
+        } else if (type === "submitWork") {
+          await handleAction(
+            () => submitWork(wallet, String(jobId)),
+            jobId,
+            { event: "work_submitted", message: `Work for Job #${jobId} was submitted for review.` },
+          );
+        } else if (type === "freelancerCancelJob") {
+          await handleAction(
+            () => freelancerCancelJob(wallet, String(jobId)),
+            jobId,
+            null,
+          );
+        }
+        setPendingAction(null);
+      })();
+    } else {
+      setPendingAction({ type, jobId, amountXlm });
+    }
+  }, [wallet, handleAction]);
 
   const postedJobs = allJobs.filter((j) => j.job.client === wallet);
   const acceptedJobs = allJobs.filter((j) => j.job.freelancer === wallet);
@@ -294,7 +372,7 @@ export default function DashboardPage() {
             role="client"
             actionLoading={actionLoading}
             onAction={handleAction}
-            onRequestCancel={setPendingCancelJobId}
+            onRequestAction={requestDashAction}
             onClearFilter={() => setStatusFilter("All")}
           />
           <JobSection
@@ -307,22 +385,62 @@ export default function DashboardPage() {
             role="freelancer"
             actionLoading={actionLoading}
             onAction={handleAction}
-            onRequestCancel={setPendingCancelJobId}
+            onRequestAction={requestDashAction}
             onClearFilter={() => setStatusFilter("All")}
           />
         </>
       )}
 
-      {pendingCancelJobId !== null && (
-        <CancelJobConfirmModal
-          jobId={String(pendingCancelJobId)}
-          loading={actionLoading === pendingCancelJobId}
-          onClose={() => setPendingCancelJobId(null)}
-          onConfirm={() => {
-            void handleConfirmCancel();
-          }}
-        />
-      )}
+      {pendingAction !== null && (() => {
+        const { type, jobId, amountXlm } = pendingAction;
+        const configs = {
+          cancelJob: {
+            title: "Cancel this job?",
+            description: "Cancelling will close the job and return the escrowed funds to your wallet. This action cannot be undone.",
+            consequences: ["The job moves to Cancelled status permanently.", "The freelancer (if any) will lose access to the job."],
+            impactLine: `${amountXlm} will be refunded to your wallet`,
+            confirmLabel: "Yes, cancel job",
+            variant: "danger" as const,
+            suppressKey: CONFIRM_KEYS.cancelJob,
+          },
+          approveWork: {
+            title: "Approve and release payment?",
+            description: "Approving the submitted work releases the escrowed funds to the freelancer minus the 2.5% platform fee. This action is final.",
+            consequences: ["The job moves to Completed status permanently.", "Platform fee (2.5%) will be deducted before transfer."],
+            impactLine: `${amountXlm} (minus 2.5% fee) will be released to the freelancer`,
+            confirmLabel: "Yes, approve & pay",
+            variant: "primary" as const,
+            suppressKey: CONFIRM_KEYS.approveWork,
+          },
+          submitWork: {
+            title: "Submit work for review?",
+            description: "Submitting notifies the client that your work is ready for review. This action cannot be undone.",
+            consequences: ["The job moves to Submitted for Review status.", "The client can then approve or raise a dispute."],
+            confirmLabel: "Yes, submit work",
+            variant: "warning" as const,
+            suppressKey: CONFIRM_KEYS.submitWork,
+          },
+          freelancerCancelJob: {
+            title: "Cancel this job?",
+            description: "Cancelling as a freelancer returns the full escrowed amount to the client. This action cannot be undone.",
+            consequences: ["The job moves to Cancelled status permanently.", "The full escrow amount is refunded to the client."],
+            impactLine: `${amountXlm} will be refunded to the client`,
+            confirmLabel: "Yes, cancel job",
+            variant: "danger" as const,
+            suppressKey: CONFIRM_KEYS.freelancerCancelJob,
+          },
+        } as const;
+        const cfg = configs[type];
+        return (
+          <ConfirmDialog
+            open={true}
+            {...cfg}
+            loading={actionLoading === jobId}
+            onConfirm={() => void handleConfirmCancel()}
+            onCancel={() => setPendingAction(null)}
+          />
+        );
+      })()}
     </section>
   );
 }
@@ -337,7 +455,7 @@ function JobSection({
   role,
   actionLoading,
   onAction,
-  onRequestCancel,
+  onRequestAction,
   onClearFilter,
 }: {
   title: string;
@@ -348,8 +466,8 @@ function JobSection({
   wallet: string;
   role: "client" | "freelancer";
   actionLoading: number | null;
-  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
-  onRequestCancel: (jobId: number) => void;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string } | null) => Promise<void>;
+  onRequestAction: (type: PendingDashAction["type"], jobId: number, amountXlm: string) => void;
   onClearFilter: () => void;
 }) {
   return (
@@ -381,7 +499,7 @@ function JobSection({
                 role={role}
                 isLoading={actionLoading === id}
                 onAction={onAction}
-                onRequestCancel={onRequestCancel}
+                onRequestAction={onRequestAction}
               />
             </li>
           ))}
@@ -398,17 +516,18 @@ function JobCard({
   role,
   isLoading,
   onAction,
-  onRequestCancel,
+  onRequestAction,
 }: {
   id: number;
   job: Job;
   wallet: string;
   role: "client" | "freelancer";
   isLoading: boolean;
-  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
-  onRequestCancel: (jobId: number) => void;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string } | null) => Promise<void>;
+  onRequestAction: (type: PendingDashAction["type"], jobId: number, amountXlm: string) => void;
 }) {
   const actions = getActions(id, job, wallet, role);
+  const amountXlm = `${toXlm(job.amount)} XLM`;
 
   return (
     <article className="interactive-card h-full p-4">
@@ -442,24 +561,38 @@ function JobCard({
       </div>
       {actions.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              disabled={isLoading}
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:max-w-44"
-              onClick={() => {
-                if (action.label === "Cancel Job") {
-                  onRequestCancel(id);
-                  return;
-                }
-                void onAction(() => action.fn(), id, action.notification ?? undefined);
-              }}
-              title={action.label}
-              aria-haspopup={action.label === "Cancel Job" ? "dialog" : undefined}
-            >
-              <span className="block truncate">{isLoading ? "..." : action.label}</span>
-            </button>
-          ))}
+          {actions.map((action) => {
+            // Actions that need a confirmation dialog
+            const needsConfirm =
+              action.label === "Cancel Job" ||
+              action.label === "Approve Work" ||
+              action.label === "Submit Work";
+
+            const actionTypeMap: Record<string, PendingDashAction["type"]> = {
+              "Cancel Job": role === "freelancer" ? "freelancerCancelJob" : "cancelJob",
+              "Approve Work": "approveWork",
+              "Submit Work": "submitWork",
+            };
+
+            return (
+              <button
+                key={action.label}
+                disabled={isLoading}
+                className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:max-w-44"
+                onClick={() => {
+                  if (needsConfirm) {
+                    onRequestAction(actionTypeMap[action.label], id, amountXlm);
+                    return;
+                  }
+                  void onAction(() => action.fn(), id, action.notification ?? undefined);
+                }}
+                title={action.label}
+                aria-haspopup={needsConfirm ? "dialog" : undefined}
+              >
+                <span className="block truncate">{isLoading ? "..." : action.label}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </article>
