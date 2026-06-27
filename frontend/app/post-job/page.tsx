@@ -3,9 +3,10 @@
 import { getDescPayloadMax, postJob, storeDescriptionCid } from "@/lib/contract";
 import { uploadToIpfs } from "@/lib/ipfs-service";
 import ErrorBanner from "@/components/ErrorBanner";
+import RichTextEditor, { htmlToPlainText } from "@/components/RichTextEditor";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
@@ -18,8 +19,9 @@ async function sha256Hex(input: string): Promise<string> {
 export default function PostJobPage() {
   const { wallet, connectWallet } = useWallet();
   const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(""); // stores HTML from the rich text editor
   const [deadline, setDeadline] = useState("");
+  const descriptionLabelId = useId();
   const [tokenAddress, setTokenAddress] = useState(
     process.env.NEXT_PUBLIC_NATIVE_TOKEN ?? "",
   );
@@ -101,8 +103,9 @@ export default function PostJobPage() {
             if (!amountStroops || BigInt(amountStroops) <= 0n) {
               nextFieldErrors.amount = "Enter a valid amount with up to 7 decimal places.";
             }
-            const descriptionBytes = new TextEncoder().encode(description.trim()).length;
-            if (!description.trim()) {
+            const plainDescription = htmlToPlainText(description);
+            const descriptionBytes = new TextEncoder().encode(plainDescription).length;
+            if (!plainDescription) {
               nextFieldErrors.description = "Job description cannot be empty.";
             } else if (descriptionBytes > maxDescPayloadBytes) {
               nextFieldErrors.description = `Description must be at most ${maxDescPayloadBytes} bytes (currently ${descriptionBytes}).`;
@@ -127,15 +130,19 @@ export default function PostJobPage() {
               setFieldErrors(nextFieldErrors);
               return;
             }
-            const trimmedDescription = description.trim();
-            const hashHex = await sha256Hex(trimmedDescription);
-            const descriptionPayloadLen = new TextEncoder().encode(trimmedDescription).length;
+            // Store the full HTML so rich text is preserved; derive plain text
+            // for the on-chain hash so plain-text consumers still work.
+            const htmlContent = description.trim();
+            const plainContent = htmlToPlainText(htmlContent);
+            const hashHex = await sha256Hex(plainContent);
+            const descriptionPayloadLen = new TextEncoder().encode(plainContent).length;
             const deadlineUnix = deadline
               ? Math.floor(new Date(deadline).getTime() / 1000).toString()
               : "0";
 
-            localStorage.setItem(`job-desc:${hashHex}`, trimmedDescription);
-            const cid = await uploadToIpfs(trimmedDescription);
+            // Persist HTML for rich rendering; also store plain text under the hash key
+            localStorage.setItem(`job-desc:${hashHex}`, htmlContent);
+            const cid = await uploadToIpfs(htmlContent);
             const result = await postJob(
               wallet,
               amountStroops!,
@@ -218,27 +225,28 @@ export default function PostJobPage() {
           )}
         </label>
 
-        <label className="block text-sm font-medium">
-          Job Description
-          <textarea
-            className="mt-1 min-h-36 w-full rounded-md border border-slate-300 px-3 py-2"
-            value={description}
-            onChange={(e) => {
-              setDescription(e.target.value);
-              setFieldErrors((current) => ({ ...current, description: undefined }));
-            }}
-            aria-invalid={Boolean(fieldErrors.description)}
-            aria-describedby={
-              fieldErrors.description ? "post-job-description-error" : undefined
-            }
-            required
-          />
+        <div className="block text-sm font-medium">
+          <span id={descriptionLabelId}>Job Description</span>
+          <div className="mt-1">
+            <RichTextEditor
+              value={description}
+              onChange={(html) => {
+                setDescription(html);
+                setFieldErrors((current) => ({ ...current, description: undefined }));
+              }}
+              maxBytes={maxDescPayloadBytes}
+              error={fieldErrors.description}
+              errorId={fieldErrors.description ? "post-job-description-error" : undefined}
+              labelId={descriptionLabelId}
+              required
+            />
+          </div>
           {fieldErrors.description && (
             <p id="post-job-description-error" className="mt-1 text-xs text-red-600">
               {fieldErrors.description}
             </p>
           )}
-        </label>
+        </div>
 
         <label className="block text-sm font-medium">
           Deadline (optional)

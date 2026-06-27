@@ -18,6 +18,8 @@ const MAX_FEE_TIERS: u32 = 10;
 #[allow(dead_code)]
 const XLM_STROOP: i128 = 10_000_000;
 const UPGRADE_TIMELOCK_SECS: u64 = 86_400;
+/// Default dispute deposit: 5 XLM in stroops.
+const DEFAULT_DISPUTE_FEE: i128 = 50_000_000;
 /// Maximum number of milestones allowed per job.
 const MAX_MILESTONES: u32 = 20;
 
@@ -117,6 +119,12 @@ pub enum DataKey {
     ReferralEarnings(Address),
     ClientReferrer(Address),
     ReferralBonusPaid(Address),
+    /// Configurable dispute fee in native-token stroops.
+    DisputeFee,
+    /// Stores the dispute fee deposited by the raiser, keyed by job_id.
+    DisputeFeePaid(u64),
+    /// Address of the party who raised the dispute, keyed by job_id.
+    DisputeRaiser(u64),
 }
 
 #[contracterror]
@@ -542,12 +550,38 @@ impl EscrowContract {
             panic_with_error!(&e, Error::Unauthorized);
         }
 
+        // Collect dispute fee deposit from the raiser in the native token.
+        let dispute_fee = get_dispute_fee_storage(&e);
+        if dispute_fee > 0 {
+            let native_token = load_native_token(&e);
+            let token_client = token::Client::new(&e, &native_token);
+            token_client.transfer(&caller, &e.current_contract_address(), &dispute_fee);
+        }
+
+        // Record who raised the dispute and how much they deposited.
+        e.storage()
+            .persistent()
+            .set(&DataKey::DisputeRaiser(job_id), &caller);
+        e.storage()
+            .persistent()
+            .set(&DataKey::DisputeFeePaid(job_id), &dispute_fee);
+        e.storage().persistent().extend_ttl(
+            &DataKey::DisputeRaiser(job_id),
+            ACTIVE_JOB_LIFETIME_THRESHOLD,
+            ACTIVE_JOB_BUMP_AMOUNT,
+        );
+        e.storage().persistent().extend_ttl(
+            &DataKey::DisputeFeePaid(job_id),
+            ACTIVE_JOB_LIFETIME_THRESHOLD,
+            ACTIVE_JOB_BUMP_AMOUNT,
+        );
+
         job.status = JobStatus::Disputed;
         set_job(&e, job_id, &job);
         bump_instance_ttl(&e);
 
         e.events()
-            .publish((Symbol::new(&e, "job_disputed"),), (job_id, caller));
+            .publish((Symbol::new(&e, "job_disputed"),), (job_id, caller, dispute_fee));
     }
 
     /// Resolve a disputed job.
@@ -582,7 +616,86 @@ impl EscrowContract {
             panic_with_error!(&e, Error::InvalidAmount);
         }
 
+        // Load dispute fee deposit state.
+        let dispute_fee: i128 = e
+            .storage()
+            .persistent()
+            .get(&DataKey::DisputeFeePaid(job_id))
+            .unwrap_or(0i128);
+        let raiser: Option<Address> = e
+            .storage()
+            .persistent()
+            .get(&DataKey::DisputeRaiser(job_id));
+
+        // Clean up dispute fee storage.
+        e.storage()
+            .persistent()
+            .remove(&DataKey::DisputeFeePaid(job_id));
+        e.storage()
+            .persistent()
+            .remove(&DataKey::DisputeRaiser(job_id));
+
         let token_client = token::Client::new(&e, &job.token);
+        let native_token = load_native_token(&e);
+        let native_token_client = token::Client::new(&e, &native_token);
+
+        /// Determine winner: the raiser wins if their share >= 50%.
+        /// client_bps == 10_000 → client wins everything → client wins if client raised
+        /// client_bps == 0     → freelancer wins everything → freelancer wins if freelancer raised
+        let raiser_wins = match &raiser {
+            Some(raiser_addr) => {
+                if raiser_addr == &job.client {
+                    // client raised: wins if client_bps > 5000 (majority to client)
+                    resolution.client_bps > 5_000
+                } else {
+                    // freelancer raised: wins if client_bps < 5000 (majority to freelancer)
+                    resolution.client_bps < 5_000
+                }
+            }
+            None => false,
+        };
+
+        // Handle dispute fee: refund to raiser if they win, else split between counterparty and admin.
+        if dispute_fee > 0 {
+            if raiser_wins {
+                if let Some(raiser_addr) = &raiser {
+                    native_token_client.transfer(
+                        &e.current_contract_address(),
+                        raiser_addr,
+                        &dispute_fee,
+                    );
+                }
+            } else {
+                // Loser's fee: half to the counterparty, half to admin.
+                let half = dispute_fee / 2;
+                let remainder = checked_sub(&e, dispute_fee, half);
+                // Identify the counterparty (the party that did NOT raise the dispute).
+                let counterparty = match &raiser {
+                    Some(raiser_addr) => {
+                        if raiser_addr == &job.client {
+                            freelancer.clone()
+                        } else {
+                            job.client.clone()
+                        }
+                    }
+                    None => admin.clone(),
+                };
+                if half > 0 {
+                    native_token_client.transfer(
+                        &e.current_contract_address(),
+                        &counterparty,
+                        &half,
+                    );
+                }
+                if remainder > 0 {
+                    native_token_client.transfer(
+                        &e.current_contract_address(),
+                        &admin,
+                        &remainder,
+                    );
+                }
+            }
+        }
 
         if resolution.client_bps == BPS_DENOMINATOR as u32 {
             job.status = JobStatus::Cancelled;
@@ -645,6 +758,30 @@ impl EscrowContract {
 
     pub fn get_fee_bps(e: Env) -> i128 {
         get_fee_bps_storage(&e)
+    }
+
+    /// Return the current dispute fee deposit amount in stroops (native token).
+    pub fn get_dispute_fee(e: Env) -> i128 {
+        get_dispute_fee_storage(&e)
+    }
+
+    /// Admin-only: update the dispute fee deposit amount.
+    /// Pass 0 to disable the deposit requirement.
+    pub fn update_dispute_fee(e: Env, admin: Address, new_fee: i128) {
+        admin.require_auth();
+        let stored_admin = load_admin(&e);
+        if admin != stored_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        if new_fee < 0 {
+            panic_with_error!(&e, Error::InvalidAmount);
+        }
+        e.storage()
+            .instance()
+            .set(&DataKey::DisputeFee, &new_fee);
+        bump_instance_ttl(&e);
+        e.events()
+            .publish((Symbol::new(&e, "dispute_fee_updated"),), (admin, new_fee));
     }
 
     pub fn get_job(e: Env, job_id: u64) -> Job {
@@ -1219,6 +1356,13 @@ fn get_fee_bps_storage(e: &Env) -> i128 {
         .instance()
         .get::<DataKey, i128>(&DataKey::FeeBps)
         .unwrap_or(DEFAULT_FEE_BPS)
+}
+
+fn get_dispute_fee_storage(e: &Env) -> i128 {
+    e.storage()
+        .instance()
+        .get::<DataKey, i128>(&DataKey::DisputeFee)
+        .unwrap_or(DEFAULT_DISPUTE_FEE)
 }
 
 fn get_description_payload_max_bytes_storage(e: &Env) -> u32 {

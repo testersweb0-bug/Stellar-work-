@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { WalletProvider } from "@/lib/wallet-context";
 import { ToastProvider } from "@/components/ToastProvider";
 import { NotificationProvider } from "@/lib/notifications-context";
+import { MessagingProvider } from "@/lib/messaging-context";
 import { Navigation } from "./navigation";
 import { ScrollRestorer } from "@/components/ScrollRestorer";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
         <WalletProvider>
           <NotificationProvider>
+          <MessagingProvider>
           <ToastProvider>
           <a
             href="#main-content"
@@ -86,6 +88,7 @@ export default function RootLayout({
             </div>
           </footer>
           </ToastProvider>
+          </MessagingProvider>
           </NotificationProvider>
         </WalletProvider>
       </body>
