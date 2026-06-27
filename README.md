@@ -236,6 +236,31 @@ For third-party integration, see `docs/INTEGRATION.md`.
 
 For the full documentation index, see [docs/README.md](docs/README.md).
 
+## Production Operations
+
+For deploying and operating StellarWork in production, start with these three documents:
+
+| Document | Purpose |
+|----------|---------|
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Step-by-step production deployment: contract build/deploy/initialize, Vercel frontend, DNS/SSL, post-deploy verification |
+| [docs/OPS_RUNBOOK.md](docs/OPS_RUNBOOK.md) | Ongoing operations: monitoring signals, backup procedures, incident response, contract upgrades, regular maintenance |
+| [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) | Pre-launch checklist with sign-off table — complete before going live |
+
+## Video Tutorials
+
+Step-by-step video walkthroughs for the most common workflows. Videos are recorded on Stellar testnet — no real funds are used.
+
+| # | Title | Audience | Status |
+|---|-------|----------|--------|
+| 01 | Getting Started: Connecting Your Wallet | All | Planned |
+| 02 | Posting Your First Job | Clients | Planned |
+| 03 | Finding and Accepting Jobs as a Freelancer | Freelancers | Planned |
+| 04 | Completing a Job and Getting Paid | Freelancers | Planned |
+| 05 | Managing Disputes | All | Planned |
+
+> When videos are published, replace "Planned" with a link to the video (e.g., `[Watch →](https://youtube.com/...)`).
+
+For recording setup, script templates, format guidelines, and closed captioning standards, see [docs/VIDEO_TUTORIALS.md](docs/VIDEO_TUTORIALS.md).
 
 ## License
 
