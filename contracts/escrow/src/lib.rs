@@ -89,6 +89,11 @@ pub enum DataKey {
     PendingUpgradeWasmHash,
     PendingUpgradeDeadline,
     DescriptionCidMapping(BytesN<32>),
+    // Issue #412: referral reward system
+    ReferralCode(String),
+    ReferralEarnings(Address),
+    ClientReferrer(Address),
+    ReferralBonusPaid(Address),
 }
 
 #[contracterror]
@@ -115,6 +120,10 @@ pub enum Error {
     UpgradeNotApproved = 18,
     UpgradeTimelockPending = 19,
     NoPendingUpgrade = 20,
+    // Issue #412: referral reward system
+    ReferralCodeAlreadyExists = 21,
+    ReferralCodeNotFound = 22,
+    InsufficientReferralEarnings = 23,
 }
 
 #[contract]
@@ -291,6 +300,51 @@ impl EscrowContract {
 
         let token_client = token::Client::new(&e, &job.token);
         token_client.transfer(&e.current_contract_address(), &freelancer, &payout);
+
+        // Issue #412: credit 0.5% referral bonus on the client's first completed job.
+        let bonus_paid_key = DataKey::ReferralBonusPaid(job.client.clone());
+        let already_paid: bool = e
+            .storage()
+            .persistent()
+            .get(&bonus_paid_key)
+            .unwrap_or(false);
+        if !already_paid {
+            let client_ref_key = DataKey::ClientReferrer(job.client.clone());
+            if let Some(referrer) = e
+                .storage()
+                .persistent()
+                .get::<DataKey, Address>(&client_ref_key)
+            {
+                // 0.5% of job amount (50 basis points)
+                const REFERRAL_BPS: i128 = 50;
+                let bonus = checked_mul_div(&e, job.amount, REFERRAL_BPS, BPS_DENOMINATOR);
+                let earnings_key = DataKey::ReferralEarnings(referrer.clone());
+                let prev: i128 = e
+                    .storage()
+                    .persistent()
+                    .get(&earnings_key)
+                    .unwrap_or(0i128);
+                e.storage()
+                    .persistent()
+                    .set(&earnings_key, &checked_add(&e, prev, bonus));
+                e.storage().persistent().extend_ttl(
+                    &earnings_key,
+                    INSTANCE_LIFETIME_THRESHOLD,
+                    INSTANCE_BUMP_AMOUNT,
+                );
+                // Mark bonus as paid so subsequent jobs don't trigger it again.
+                e.storage().persistent().set(&bonus_paid_key, &true);
+                e.storage().persistent().extend_ttl(
+                    &bonus_paid_key,
+                    INSTANCE_LIFETIME_THRESHOLD,
+                    INSTANCE_BUMP_AMOUNT,
+                );
+                e.events().publish(
+                    (Symbol::new(&e, "referral_bonus_credited"),),
+                    (referrer, job.client.clone(), bonus),
+                );
+            }
+        }
 
         e.events().publish(
             (Symbol::new(&e, "job_approved"),),
@@ -933,6 +987,95 @@ impl EscrowContract {
         e.events().publish(
             (Symbol::new(&e, "upgrade_cancelled"),),
             (admin, new_wasm_hash),
+        );
+    }
+
+    // ── Issue #412: Referral reward system ─────────────────────────────────
+
+    /// Register a referral code tied to the caller.
+    /// The `referrer` must auth.  Code is case-sensitive and globally unique.
+    pub fn register_referral(e: Env, referrer: Address, code: String) {
+        referrer.require_auth();
+        let key = DataKey::ReferralCode(code.clone());
+        if e.storage().persistent().has(&key) {
+            panic_with_error!(&e, Error::ReferralCodeAlreadyExists);
+        }
+        e.storage().persistent().set(&key, &referrer);
+        e.storage()
+            .persistent()
+            .extend_ttl(&key, INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        bump_instance_ttl(&e);
+        e.events()
+            .publish((Symbol::new(&e, "referral_registered"),), (referrer, code));
+    }
+
+    /// Post a job and optionally attribute it to a referrer via `referral_code`.
+    /// If the code exists and the client has not yet been linked to a referrer,
+    /// the referrer is stored so they can earn a bonus on the client's first
+    /// completed job.
+    pub fn post_job_with_referral(
+        e: Env,
+        client: Address,
+        amount: i128,
+        desc_hash: BytesN<32>,
+        description_payload_len: u32,
+        deadline: u64,
+        token: Address,
+        referral_code: String,
+    ) -> u64 {
+        // Validate and store the referral link before posting.
+        let code_key = DataKey::ReferralCode(referral_code.clone());
+        if !e.storage().persistent().has(&code_key) {
+            panic_with_error!(&e, Error::ReferralCodeNotFound);
+        }
+        let referrer: Address = e.storage().persistent().get(&code_key).unwrap();
+
+        // Only link the first referrer for this client.
+        let client_key = DataKey::ClientReferrer(client.clone());
+        if !e.storage().persistent().has(&client_key) {
+            e.storage().persistent().set(&client_key, &referrer);
+            e.storage().persistent().extend_ttl(
+                &client_key,
+                INSTANCE_LIFETIME_THRESHOLD,
+                INSTANCE_BUMP_AMOUNT,
+            );
+        }
+
+        // Delegate to the standard post_job logic.
+        Self::post_job(e, client, amount, desc_hash, description_payload_len, deadline, token)
+    }
+
+    /// Return the accumulated referral earnings for `referrer`.
+    pub fn get_referral_earnings(e: Env, referrer: Address) -> i128 {
+        let key = DataKey::ReferralEarnings(referrer);
+        e.storage().persistent().get(&key).unwrap_or(0i128)
+    }
+
+    /// Transfer all accrued referral earnings to `referrer`.
+    pub fn withdraw_referral_earnings(e: Env, referrer: Address) {
+        referrer.require_auth();
+        let key = DataKey::ReferralEarnings(referrer.clone());
+        let earnings: i128 = e.storage().persistent().get(&key).unwrap_or(0i128);
+        if earnings <= 0 {
+            panic_with_error!(&e, Error::InsufficientReferralEarnings);
+        }
+        e.storage().persistent().set(&key, &0i128);
+        e.storage()
+            .persistent()
+            .extend_ttl(&key, INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        bump_instance_ttl(&e);
+
+        let native_token = e
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::NativeToken)
+            .unwrap();
+        let token_client = token::Client::new(&e, &native_token);
+        token_client.transfer(&e.current_contract_address(), &referrer, &earnings);
+
+        e.events().publish(
+            (Symbol::new(&e, "referral_withdrawn"),),
+            (referrer, earnings),
         );
     }
 }
@@ -3842,6 +3985,7 @@ mod test {
             client.update_fee_tier(&user, &0, &100i128, &300i128);
         }));
         assert!(result.is_err());
+    }
     // ── cancel_job after accept tests (issue #269) ────────────────────────────
     //
     // The Open-state cancel_job path is already covered by
@@ -6676,5 +6820,141 @@ mod test {
             Op::CancelJob { job_idx: 2 },
         ];
         run_ops(&ops);
+    }
+
+    // ── Issue #412: Referral reward system tests ──────────────────────────────
+
+    #[test]
+    fn referral_register_and_lookup() {
+        let (env, client, _admin, user, _freelancer, native_token) = setup();
+        let code = String::from_str(&env, "MYCODE");
+        client.register_referral(&user, &code);
+        // Posting with the referral code should link the referrer.
+        let hash_val = hash(&env);
+        client.add_allowed_token(&native_token);
+        let job_id = client.post_job_with_referral(
+            &user,
+            &1_000_000i128,
+            &hash_val,
+            &32u32,
+            &0u64,
+            &native_token,
+            &code,
+        );
+        assert!(job_id >= 1);
+        // Earnings should still be zero before any job completes.
+        let earnings = client.get_referral_earnings(&user);
+        assert_eq!(earnings, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #21)")]
+    fn referral_duplicate_code_rejected() {
+        let (env, client, _admin, user, _freelancer, _native_token) = setup();
+        let code = String::from_str(&env, "DUPCODE");
+        client.register_referral(&user, &code);
+        client.register_referral(&user, &code);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #22)")]
+    fn referral_post_job_with_unknown_code_rejected() {
+        let (env, client, _admin, user, _freelancer, native_token) = setup();
+        client.add_allowed_token(&native_token);
+        let hash_val = hash(&env);
+        let bad_code = String::from_str(&env, "BADCODE");
+        client.post_job_with_referral(
+            &user,
+            &1_000_000i128,
+            &hash_val,
+            &32u32,
+            &0u64,
+            &native_token,
+            &bad_code,
+        );
+    }
+
+    #[test]
+    fn referral_bonus_credited_on_first_job_approval() {
+        let (env, client, _admin, user, freelancer, native_token) = setup();
+        let referrer = Address::generate(&env);
+        let asset = token::StellarAssetClient::new(&env, &native_token);
+        asset.mint(&referrer, &1_000_000i128);
+
+        let code = String::from_str(&env, "REF1");
+        client.register_referral(&referrer, &code);
+        client.add_allowed_token(&native_token);
+
+        let hash_val = hash(&env);
+        let amount = 1_000_000i128;
+        let job_id = client.post_job_with_referral(
+            &user,
+            &amount,
+            &hash_val,
+            &32u32,
+            &0u64,
+            &native_token,
+            &code,
+        );
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+
+        // Referrer should have 0.5% (50 bps) of the job amount credited.
+        let expected_bonus = (amount * 50) / 10_000;
+        let earnings = client.get_referral_earnings(&referrer);
+        assert_eq!(earnings, expected_bonus);
+    }
+
+    #[test]
+    fn referral_bonus_only_awarded_once() {
+        let (env, client, _admin, user, freelancer, native_token) = setup();
+        let referrer = Address::generate(&env);
+        let asset = token::StellarAssetClient::new(&env, &native_token);
+        asset.mint(&referrer, &1_000_000i128);
+        asset.mint(&user, &10_000_000i128);
+
+        let code = String::from_str(&env, "ONCE");
+        client.register_referral(&referrer, &code);
+        client.add_allowed_token(&native_token);
+
+        // First job via referral code.
+        let amount = 1_000_000i128;
+        let job_id = client.post_job_with_referral(
+            &user,
+            &amount,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+            &code,
+        );
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        client.approve_work(&user, &job_id);
+        let after_first = client.get_referral_earnings(&referrer);
+
+        // Second job by same client (direct, no code) — no additional bonus.
+        let job_id2 = client.post_job(
+            &user,
+            &amount,
+            &hash(&env),
+            &32u32,
+            &0u64,
+            &native_token,
+        );
+        client.accept_job(&freelancer, &job_id2);
+        client.submit_work(&freelancer, &job_id2);
+        client.approve_work(&user, &job_id2);
+        let after_second = client.get_referral_earnings(&referrer);
+
+        assert_eq!(after_first, after_second);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #23)")]
+    fn referral_withdraw_with_zero_earnings_rejected() {
+        let (env, client, _admin, user, _freelancer, _native_token) = setup();
+        client.withdraw_referral_earnings(&user);
     }
 }
