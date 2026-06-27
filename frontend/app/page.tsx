@@ -6,6 +6,7 @@ import InfoTooltip from "@/components/InfoTooltip";
 import NoResultsState from "@/components/NoResultsState";
 import JobCardSkeleton from "@/components/JobCardSkeleton";
 import SectionCard from "@/components/SectionCard";
+import JobFilterPanel, { DEFAULT_FILTERS, type JobFilters } from "@/components/JobFilterPanel";
 import { acceptJob, getDescriptionCid, getJob, getJobCount } from "@/lib/contract";
 import { fetchFromIpfs } from "@/lib/ipfs-service";
 import { useNotifications } from "@/lib/notifications-context";
@@ -22,6 +23,7 @@ import type { Job } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 
 const BOOKMARK_STORAGE_KEY = "stellarwork:bookmarked-jobs";
 const VIEW_MODE_STORAGE_KEY = "stellarwork:jobs-view-mode";
@@ -57,6 +59,19 @@ export default function HomePage() {
   const isInitialLoadRef = useRef(true);
   const [viewMode, setViewMode] = useState<JobsViewMode>("grid");
   const [descriptions, setDescriptions] = useState<Record<string, string>>({});
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [advancedFilters, setAdvancedFilters] = useState<JobFilters>(() => {
+    if (typeof window === "undefined") return DEFAULT_FILTERS;
+    const params = new URLSearchParams(window.location.search);
+    return {
+      minAmount: params.get("minAmount") ?? "",
+      maxAmount: params.get("maxAmount") ?? "",
+      dateRange: (params.get("dateRange") as JobFilters["dateRange"]) ?? "all",
+      freelancerStatus: (params.get("freelancerStatus") as JobFilters["freelancerStatus"]) ?? "all",
+    };
+  });
 
   useEffect(() => {
     setViewMode(readViewMode());
@@ -106,6 +121,17 @@ export default function HomePage() {
     if (recentSearches === null) return;
     saveRecentSearches(recentSearches);
   }, [recentSearches]);
+
+  // Sync advanced filters to URL query params for bookmarking.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (advancedFilters.minAmount) params.set("minAmount", advancedFilters.minAmount);
+    if (advancedFilters.maxAmount) params.set("maxAmount", advancedFilters.maxAmount);
+    if (advancedFilters.dateRange !== "all") params.set("dateRange", advancedFilters.dateRange);
+    if (advancedFilters.freelancerStatus !== "all") params.set("freelancerStatus", advancedFilters.freelancerStatus);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [advancedFilters, pathname, router]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -215,24 +241,49 @@ export default function HomePage() {
       ? jobs.filter(({ id }) => bookmarkedIds.includes(id))
       : jobs;
 
-    if (!normalizedSearchTerm) {
-      return bookmarkedJobs;
-    }
+    const now = Math.floor(Date.now() / 1000);
+    const dateThresholds: Record<string, number> = {
+      "24h": now - 86400,
+      "7d": now - 7 * 86400,
+      "30d": now - 30 * 86400,
+    };
 
-    return bookmarkedJobs.filter(({ id, job }) => {
-      const description = getDescription(job.description_hash).toLowerCase();
-      const amount = toXlm(job.amount).toLowerCase();
-      const freelancer = job.freelancer?.toLowerCase() ?? "";
-      return [
-        String(id),
-        job.description_hash.toLowerCase(),
-        description,
-        amount,
-        job.client.toLowerCase(),
-        freelancer,
-      ].some((value) => value.includes(normalizedSearchTerm));
+    const afterSearch = normalizedSearchTerm
+      ? bookmarkedJobs.filter(({ id, job }) => {
+          const description = getDescription(job.description_hash).toLowerCase();
+          const amount = toXlm(job.amount).toLowerCase();
+          const freelancer = job.freelancer?.toLowerCase() ?? "";
+          return [
+            String(id),
+            job.description_hash.toLowerCase(),
+            description,
+            amount,
+            job.client.toLowerCase(),
+            freelancer,
+          ].some((value) => value.includes(normalizedSearchTerm));
+        })
+      : bookmarkedJobs;
+
+    return afterSearch.filter(({ job }) => {
+      const { minAmount, maxAmount, dateRange, freelancerStatus } = advancedFilters;
+      const amountXlm = parseFloat(toXlm(job.amount));
+
+      if (minAmount !== "" && !Number.isNaN(parseFloat(minAmount))) {
+        if (amountXlm < parseFloat(minAmount)) return false;
+      }
+      if (maxAmount !== "" && !Number.isNaN(parseFloat(maxAmount))) {
+        if (amountXlm > parseFloat(maxAmount)) return false;
+      }
+      if (dateRange !== "all") {
+        const threshold = dateThresholds[dateRange];
+        if (threshold !== undefined && job.created_at < threshold) return false;
+      }
+      if (freelancerStatus === "unassigned" && job.freelancer) return false;
+      if (freelancerStatus === "assigned" && !job.freelancer) return false;
+
+      return true;
     });
-  }, [bookmarkedIds, getDescription, jobs, normalizedSearchTerm, showBookmarkedOnly]);
+  }, [advancedFilters, bookmarkedIds, getDescription, jobs, normalizedSearchTerm, showBookmarkedOnly]);
 
   useEffect(() => {
     if (loading) return;
@@ -405,6 +456,12 @@ export default function HomePage() {
         )
       )}
 
+      <JobFilterPanel
+        filters={advancedFilters}
+        onChange={(f) => { setAdvancedFilters(f); setPage(1); }}
+        resultCount={visibleJobs.length}
+      />
+
       <SectionCard
         title="Jobs Display"
         description="Default sort is newest first."
@@ -560,6 +617,7 @@ export default function HomePage() {
                 setShowBookmarkedOnly(false);
                 setSearchTerm("");
                 setSortOrder("newest");
+                setAdvancedFilters(DEFAULT_FILTERS);
                 setPage(1);
               }}
             >
