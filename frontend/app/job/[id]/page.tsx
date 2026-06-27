@@ -8,7 +8,16 @@ import StatusPill from "@/components/StatusPill";
 import { useNotifications } from "@/lib/notifications-context";
 import { acceptJob, approveWork, cancelJob, freelancerCancelJob, getDescriptionCid, getJob, submitWork } from "@/lib/contract";
 import { fetchFromIpfs } from "@/lib/ipfs-service";
-import { formatDeadline, toXlm } from "@/lib/format";
+import {
+  fetchXlmFiatRates,
+  formatDeadline,
+  formatXlmFiatRateTooltip,
+  formatXlmWithFiat,
+  getCachedXlmFiatRates,
+  getPreferredFiatCurrency,
+  type FiatCurrency,
+  type XlmFiatRateCache,
+} from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import { isConfirmSuppressed, CONFIRM_KEYS } from "@/lib/confirm-prefs";
 import type { Job } from "@/lib/types";
@@ -34,6 +43,8 @@ export default function JobDetailPage() {
   const [invalidId, setInvalidId] = useState(false);
   const [copied, setCopied] = useState(false);
   const [description, setDescription] = useState<string | null>(null);
+  const [fiatCurrency, setFiatCurrency] = useState<FiatCurrency>("USD");
+  const [fiatRates, setFiatRates] = useState<XlmFiatRateCache | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const numericId = Number(id);
@@ -82,6 +93,24 @@ export default function JobDetailPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    setFiatCurrency(getPreferredFiatCurrency());
+    setFiatRates(getCachedXlmFiatRates());
+    let cancelled = false;
+
+    fetchXlmFiatRates()
+      .then((cache) => {
+        if (!cancelled) setFiatRates(cache);
+      })
+      .catch(() => {
+        if (!cancelled) setFiatRates(getCachedXlmFiatRates());
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!wallet) {
@@ -208,7 +237,8 @@ export default function JobDetailPage() {
 
   // ── Confirm dialog configs ──────────────────────────────────────────────
 
-  const amountXlm = job ? `${toXlm(job.amount)} XLM` : "";
+  const amountXlm = job ? formatXlmWithFiat(job.amount, fiatCurrency, fiatRates?.rates) : "";
+  const fiatTooltip = formatXlmFiatRateTooltip(fiatCurrency, fiatRates?.rates, fiatRates?.fetchedAt);
 
   const DIALOG_CONFIG: Record<
     PendingAction,
@@ -370,8 +400,8 @@ export default function JobDetailPage() {
             "Not assigned"
           )}
         </p>
-        <p>
-          <strong>Amount:</strong> {toXlm(job.amount)} XLM
+        <p title={fiatTooltip}>
+          <strong>Amount:</strong> {formatXlmWithFiat(job.amount, fiatCurrency, fiatRates?.rates)}
         </p>
         <p>
           <strong>Token:</strong>{" "}
