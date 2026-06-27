@@ -14,6 +14,9 @@ const CONTRACT_VERSION: u32 = 1;
 const DEFAULT_DESCRIPTION_PAYLOAD_MAX_BYTES: u32 = 4096;
 const MIN_DESCRIPTION_PAYLOAD_MAX_BYTES: u32 = 32;
 const MAX_DESCRIPTION_PAYLOAD_MAX_BYTES: u32 = 65_536;
+const MAX_FEE_TIERS: u32 = 10;
+#[allow(dead_code)]
+const XLM_STROOP: i128 = 10_000_000;
 
 const INSTANCE_LIFETIME_THRESHOLD: u32 = 17_280;
 const INSTANCE_BUMP_AMOUNT: u32 = 518_400;
@@ -55,6 +58,13 @@ pub struct Job {
 ///    5_000 → 50 / 50 split (fee deducted from total before splitting)
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeTier {
+    pub min_amount: i128,
+    pub fee_bps: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisputeResolution {
     /// Basis-points share for the client (0 – 10 000).
     pub client_bps: u32,
@@ -71,6 +81,8 @@ pub enum DataKey {
     AllowedToken(Address),
     TokenFees(Address),
     FeeBps,
+    FeeTier(u32),
+    FeeTierCount,
     DescriptionPayloadMaxBytes,
     MaxActiveJobsPerClient,
 }
@@ -258,7 +270,8 @@ impl EscrowContract {
             Option::None => panic_with_error!(&e, Error::InvalidStatus),
         };
 
-        let fee = checked_mul_div(&e, job.amount, get_fee_bps_storage(&e), BPS_DENOMINATOR);
+        let fee_bps = calculate_fee_for_amount(&e, job.amount);
+        let fee = checked_mul_div(&e, job.amount, fee_bps, BPS_DENOMINATOR);
         let payout = checked_sub(&e, job.amount, fee);
         let current_fees = get_token_fees(&e, &job.token);
         let updated_fees = checked_add(&e, current_fees, fee);
@@ -615,6 +628,55 @@ impl EscrowContract {
         );
     }
 
+    pub fn update_fee_tier(e: Env, caller: Address, tier_index: u32, min_amount: i128, fee_bps: i128) {
+        caller.require_auth();
+        let admin = load_admin(&e);
+        if caller != admin {
+            panic_with_error!(&e, Error::Unauthorized);
+        }
+
+        if tier_index >= MAX_FEE_TIERS {
+            panic_with_error!(&e, Error::InvalidAmount);
+        }
+
+        if fee_bps <= 0 || fee_bps > MAX_FEE_BPS_CONFIG {
+            panic_with_error!(&e, Error::InvalidAmount);
+        }
+
+        let tier = FeeTier { min_amount, fee_bps };
+        store_fee_tier(&e, tier_index, &tier);
+
+        let current_count = get_fee_tier_count(&e);
+        if tier_index >= current_count {
+            set_fee_tier_count(&e, tier_index + 1);
+        }
+
+        bump_instance_ttl(&e);
+
+        e.events().publish(
+            (Symbol::new(&e, "fee_tier_updated"),),
+            (caller, tier_index, min_amount, fee_bps),
+        );
+    }
+
+    pub fn get_fee_tiers(e: Env) -> Vec<FeeTier> {
+        let count = get_fee_tier_count(&e);
+        let mut tiers = Vec::new(&e);
+        for i in 0..count {
+            if let Some(tier) = e.storage()
+                .instance()
+                .get::<DataKey, FeeTier>(&DataKey::FeeTier(i))
+            {
+                tiers.push_back(tier);
+            }
+        }
+        tiers
+    }
+
+    pub fn get_fee_tier_count_view(e: Env) -> u32 {
+        get_fee_tier_count(&e)
+    }
+
     pub fn set_max_active_jobs_per_client(e: Env, caller: Address, limit: u32) {
         caller.require_auth();
         let admin = load_admin(&e);
@@ -866,6 +928,51 @@ fn checked_mul_div(e: &Env, left: i128, mul: i128, div: i128) -> i128 {
     left.checked_mul(mul)
         .and_then(|v| v.checked_div(div))
         .unwrap_or_else(|| panic_with_error!(e, Error::InsufficientFunds))
+}
+
+fn calculate_fee_for_amount(e: &Env, amount: i128) -> i128 {
+    let tier_count = e.storage()
+        .instance()
+        .get::<DataKey, u32>(&DataKey::FeeTierCount)
+        .unwrap_or(0);
+
+    if tier_count == 0 {
+        return get_fee_bps_storage(e);
+    }
+
+    let mut matched_bps: i128 = get_fee_bps_storage(e);
+
+    for i in 0..tier_count {
+        if let Some(tier) = e.storage()
+            .instance()
+            .get::<DataKey, FeeTier>(&DataKey::FeeTier(i))
+        {
+            if amount >= tier.min_amount {
+                matched_bps = tier.fee_bps;
+            }
+        }
+    }
+
+    matched_bps
+}
+
+fn get_fee_tier_count(e: &Env) -> u32 {
+    e.storage()
+        .instance()
+        .get::<DataKey, u32>(&DataKey::FeeTierCount)
+        .unwrap_or(0)
+}
+
+fn store_fee_tier(e: &Env, index: u32, tier: &FeeTier) {
+    e.storage()
+        .instance()
+        .set(&DataKey::FeeTier(index), tier);
+}
+
+fn set_fee_tier_count(e: &Env, count: u32) {
+    e.storage()
+        .instance()
+        .set(&DataKey::FeeTierCount, &count);
 }
 
 #[cfg(test)]
@@ -2403,5 +2510,109 @@ mod test {
         let review_jobs = client.get_jobs_by_status(&JobStatus::SubmittedForReview);
         assert_eq!(review_jobs.len(), 1);
         assert_eq!(review_jobs.get(0).unwrap().amount, 3_000_000);
+    }
+
+    #[test]
+    fn fee_tier_no_tiers_uses_flat_fee() {
+        let (_env, client, admin, user, freelancer, native_token) = setup();
+        client.update_fee_bps(&admin, &250i128);
+        let job_id = client.post_job(&user, &5_000_000_000i128, &hash(&_env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        let fees_before = client.get_fees(&native_token);
+        client.approve_work(&user, &job_id);
+        let fees_after = client.get_fees(&native_token);
+        let fee = fees_after - fees_before;
+        let expected = (5_000_000_000i128 * 250i128) / BPS_DENOMINATOR;
+        assert_eq!(fee, expected);
+    }
+
+    #[test]
+    fn fee_tier_small_job_uses_higher_fee() {
+        let (_env, client, admin, user, freelancer, native_token) = setup();
+        client.update_fee_tier(&admin, &0, &(1 * XLM_STROOP), &300i128);
+        client.update_fee_tier(&admin, &1, &(100 * XLM_STROOP), &250i128);
+        client.update_fee_tier(&admin, &2, &(500 * XLM_STROOP), &200i128);
+        client.update_fee_tier(&admin, &3, &(1000 * XLM_STROOP), &150i128);
+
+        let tiers = client.get_fee_tiers();
+        assert_eq!(tiers.len(), 4);
+
+        let amount = 50 * XLM_STROOP;
+        let job_id = client.post_job(&user, &amount, &hash(&_env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        let fees_before = client.get_fees(&native_token);
+        client.approve_work(&user, &job_id);
+        let fees_after = client.get_fees(&native_token);
+        let fee = fees_after - fees_before;
+        let expected = (amount * 300i128) / BPS_DENOMINATOR;
+        assert_eq!(fee, expected);
+    }
+
+    #[test]
+    fn fee_tier_medium_job_uses_mid_fee() {
+        let (_env, client, admin, user, freelancer, native_token) = setup();
+        client.update_fee_tier(&admin, &0, &(1 * XLM_STROOP), &300i128);
+        client.update_fee_tier(&admin, &1, &(100 * XLM_STROOP), &250i128);
+
+        let amount = 200 * XLM_STROOP;
+        let job_id = client.post_job(&user, &amount, &hash(&_env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        let fees_before = client.get_fees(&native_token);
+        client.approve_work(&user, &job_id);
+        let fees_after = client.get_fees(&native_token);
+        let fee = fees_after - fees_before;
+        let expected = (amount * 250i128) / BPS_DENOMINATOR;
+        assert_eq!(fee, expected);
+    }
+
+    #[test]
+    fn fee_tier_large_job_uses_lowest_fee() {
+        let (_env, client, admin, user, freelancer, native_token) = setup();
+        client.update_fee_tier(&admin, &0, &(1 * XLM_STROOP), &300i128);
+        client.update_fee_tier(&admin, &1, &(100 * XLM_STROOP), &250i128);
+        client.update_fee_tier(&admin, &2, &(500 * XLM_STROOP), &200i128);
+        client.update_fee_tier(&admin, &3, &(900 * XLM_STROOP), &150i128);
+
+        let amount = 950 * XLM_STROOP;
+        let job_id = client.post_job(&user, &amount, &hash(&_env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        let fees_before = client.get_fees(&native_token);
+        client.approve_work(&user, &job_id);
+        let fees_after = client.get_fees(&native_token);
+        let fee = fees_after - fees_before;
+        let expected = (amount * 150i128) / BPS_DENOMINATOR;
+        assert_eq!(fee, expected);
+    }
+
+    #[test]
+    fn fee_tier_amount_at_boundary_uses_correct_tier() {
+        let (_env, client, admin, user, freelancer, native_token) = setup();
+        client.update_fee_tier(&admin, &0, &(100 * XLM_STROOP), &300i128);
+        client.update_fee_tier(&admin, &1, &(300 * XLM_STROOP), &250i128);
+
+        let amount = 100 * XLM_STROOP;
+        let job_id = client.post_job(&user, &amount, &hash(&_env), &32u32, &0u64, &native_token);
+        let job_id = client.post_job(&user, &amount, &hash(&_env), &32u32, &0u64, &native_token);
+        client.accept_job(&freelancer, &job_id);
+        client.submit_work(&freelancer, &job_id);
+        let fees_before = client.get_fees(&native_token);
+        client.approve_work(&user, &job_id);
+        let fees_after = client.get_fees(&native_token);
+        let fee = fees_after - fees_before;
+        let expected = (amount * 300i128) / BPS_DENOMINATOR;
+        assert_eq!(fee, expected);
+    }
+
+    #[test]
+    fn fee_tier_non_admin_rejected() {
+        let (_env, client, _admin, user, _, _) = setup();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.update_fee_tier(&user, &0, &100i128, &300i128);
+        }));
+        assert!(result.is_err());
     }
 }

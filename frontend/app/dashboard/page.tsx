@@ -12,6 +12,7 @@ import {
 import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
+import ExportButton from "@/components/ExportButton";
 import SectionCard from "@/components/SectionCard";
 import { useToast } from "@/components/ToastProvider";
 import { toXlm } from "@/lib/format";
@@ -181,7 +182,10 @@ export default function DashboardPage() {
 
   return (
     <section className="space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <ExportButton jobs={allJobs} wallet={wallet} />
+      </div>
 
       <div className="grid grid-cols-2 gap-4 sm:max-w-md">
         <div className="interactive-card p-4">
