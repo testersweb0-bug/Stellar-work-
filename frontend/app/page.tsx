@@ -10,7 +10,19 @@ import JobFilterPanel, { DEFAULT_FILTERS, type JobFilters } from "@/components/J
 import { acceptJob, getDescriptionCid, getJob, getJobCount } from "@/lib/contract";
 import { fetchFromIpfs } from "@/lib/ipfs-service";
 import { useNotifications } from "@/lib/notifications-context";
-import { formatDeadline, toXlm } from "@/lib/format";
+import {
+  FIAT_CURRENCIES,
+  fetchXlmFiatRates,
+  formatDeadline,
+  formatXlmFiatRateTooltip,
+  formatXlmWithFiat,
+  getCachedXlmFiatRates,
+  getPreferredFiatCurrency,
+  savePreferredFiatCurrency,
+  toXlm,
+  type FiatCurrency,
+  type XlmFiatRateCache,
+} from "@/lib/format";
 import {
   clearRecentSearches,
   loadRecentSearches,
@@ -58,6 +70,9 @@ export default function HomePage() {
   const seenJobIdsRef = useRef<Set<number>>(new Set());
   const isInitialLoadRef = useRef(true);
   const [viewMode, setViewMode] = useState<JobsViewMode>("grid");
+  const [fiatCurrency, setFiatCurrency] = useState<FiatCurrency>("USD");
+  const [fiatRates, setFiatRates] = useState<XlmFiatRateCache | null>(null);
+  const [fiatRateError, setFiatRateError] = useState<string | null>(null);
   const [descriptions, setDescriptions] = useState<Record<string, string>>({});
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -75,7 +90,29 @@ export default function HomePage() {
 
   useEffect(() => {
     setViewMode(readViewMode());
+    setFiatCurrency(getPreferredFiatCurrency());
+    setFiatRates(getCachedXlmFiatRates());
   }, []);
+
+  useEffect(() => {
+    savePreferredFiatCurrency(fiatCurrency);
+    let cancelled = false;
+    setFiatRateError(null);
+
+    fetchXlmFiatRates()
+      .then((cache) => {
+        if (!cancelled) setFiatRates(cache);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFiatRateError("Fiat rates are unavailable; showing XLM only where needed.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fiatCurrency]);
 
   useEffect(() => {
     if (viewMode === "grid") {
@@ -332,6 +369,7 @@ export default function HomePage() {
     () => visibleJobs.filter(({ id }) => newJobIds.has(id)).length,
     [newJobIds, visibleJobs],
   );
+  const fiatTooltip = formatXlmFiatRateTooltip(fiatCurrency, fiatRates?.rates, fiatRates?.fetchedAt);
 
   return (
     <section className="space-y-6">
@@ -466,6 +504,24 @@ export default function HomePage() {
         title="Jobs Display"
         description="Default sort is newest first."
       >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 p-3">
+          <label className="text-sm font-medium text-slate-700">
+            Fiat currency
+            <select
+              value={fiatCurrency}
+              onChange={(event) => setFiatCurrency(event.target.value as FiatCurrency)}
+              className="ml-2 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
+              title={fiatTooltip}
+            >
+              {FIAT_CURRENCIES.map((currency) => (
+                <option key={currency} value={currency}>
+                  {currency}
+                </option>
+              ))}
+            </select>
+          </label>
+          {fiatRateError && <p className="text-xs text-amber-700">{fiatRateError}</p>}
+        </div>
         <form onSubmit={handleSearchSubmit} className="space-y-3 rounded-md border border-slate-200 p-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
             <label className="flex-1 text-sm text-slate-600">
@@ -661,11 +717,11 @@ export default function HomePage() {
                       )}
                     </h2>
                   </Link>
-                  <p className="mt-2 flex min-w-0 items-baseline gap-1 text-sm font-bold text-slate-700">
-                    <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap tabular-nums">
-                      {toXlm(job.amount)}
-                    </span>
-                    <span className="shrink-0">XLM</span>
+                  <p
+                    className="mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-bold tabular-nums text-slate-700"
+                    title={fiatTooltip}
+                  >
+                    {formatXlmWithFiat(job.amount, fiatCurrency, fiatRates?.rates)}
                   </p>
                   <p className="mt-0.5 truncate font-mono text-xs text-slate-400">
                     Token: {job.token ? `${job.token.slice(0, 8)}...${job.token.slice(-4)}` : "N/A"}
