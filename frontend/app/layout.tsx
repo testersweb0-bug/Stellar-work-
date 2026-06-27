@@ -8,6 +8,7 @@ import { ScrollRestorer } from "@/components/ScrollRestorer";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import CommandPalette from "@/components/CommandPalette";
 import OnboardingProvider from "@/components/OnboardingProvider";
+import AnnouncementBanner from "@/components/AnnouncementBanner";
 import Link from "next/link";
 import "./globals.css";
 
@@ -52,12 +53,11 @@ export default function RootLayout({
           >
             Skip to main content
           </a>
+          <AnnouncementBanner />
           <Navigation />
           <CommandPalette />
           <OnboardingProvider />
           <ScrollRestorer />
-          <main id="main-content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
-          <footer className="mt-auto border-t border-slate-200 bg-white py-8">
           <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-3 py-6 sm:px-4 sm:py-8">
             <ErrorBoundary>{children}</ErrorBoundary>
           </main>

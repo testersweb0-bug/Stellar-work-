@@ -17,6 +17,7 @@ import { isConfirmSuppressed, CONFIRM_KEYS } from "@/lib/confirm-prefs";
 import { useWallet } from "@/lib/wallet-context";
 import type { Job, JobStatus } from "@/lib/types";
 import { useEffect, useState, useCallback } from "react";
+import { ANNOUNCEMENT_STORAGE_KEY, type AnnouncementConfig } from "@/components/AnnouncementBanner";
 
 const TX_LOG_KEY = "stellarwork:admin-withdrawals";
 
@@ -48,6 +49,12 @@ export default function AdminPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [withdrawals, setWithdrawals] = useState<WithdrawalTx[]>([]);
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false);
+
+  // Announcement state
+  const [announcementMsg, setAnnouncementMsg] = useState("");
+  const [announcementType, setAnnouncementType] = useState<"info" | "warning" | "error" | "success">("info");
+  const [announcementEnabled, setAnnouncementEnabled] = useState(false);
+  const [announcementTtl, setAnnouncementTtl] = useState<number>(0);
 
   const fetchAdminData = useCallback(async (walletAddress: string) => {
     setLoading(true);
@@ -87,6 +94,14 @@ export default function AdminPage() {
       try {
         const raw = localStorage.getItem(TX_LOG_KEY);
         if (raw) setWithdrawals(JSON.parse(raw) as WithdrawalTx[]);
+        
+        const rawAnn = localStorage.getItem(ANNOUNCEMENT_STORAGE_KEY);
+        if (rawAnn) {
+          const parsed = JSON.parse(rawAnn) as AnnouncementConfig;
+          setAnnouncementMsg(parsed.message);
+          setAnnouncementType(parsed.type);
+          setAnnouncementEnabled(parsed.enabled);
+        }
       } catch {
         /* ignore */
       }
@@ -144,6 +159,24 @@ export default function AdminPage() {
       }
     } finally {
       setWithdrawing(false);
+    }
+  };
+
+  const handlePublishAnnouncement = () => {
+    const config: AnnouncementConfig = {
+      id: `${Date.now()}`,
+      type: announcementType,
+      message: announcementMsg,
+      enabled: announcementEnabled,
+      expiresAt: announcementTtl > 0 ? Date.now() + announcementTtl * 60 * 60 * 1000 : null,
+    };
+    try {
+      localStorage.setItem(ANNOUNCEMENT_STORAGE_KEY, JSON.stringify(config));
+      window.dispatchEvent(new Event("stellarwork:announcement-updated"));
+      setSuccessMessage("Announcement updated successfully.");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (e) {
+      setError("Failed to publish announcement.");
     }
   };
 
@@ -236,6 +269,80 @@ export default function AdminPage() {
         </button>
       </SectionCard>
 
+      <SectionCard title="Announcement Management">
+        <div className="space-y-4 mt-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700">Message (HTML supported)</label>
+            <textarea
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              rows={3}
+              value={announcementMsg}
+              onChange={(e) => setAnnouncementMsg(e.target.value)}
+              placeholder="E.g. Scheduled maintenance on Friday at 2AM UTC."
+            />
+          </div>
+          
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Type</label>
+              <select
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                value={announcementType}
+                onChange={(e) => setAnnouncementType(e.target.value as any)}
+              >
+                <option value="info">Info (Blue)</option>
+                <option value="warning">Warning (Yellow)</option>
+                <option value="error">Error (Red)</option>
+                <option value="success">Success (Green)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Duration (TTL)</label>
+              <select
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                value={announcementTtl}
+                onChange={(e) => setAnnouncementTtl(Number(e.target.value))}
+              >
+                <option value={0}>No Expiration</option>
+                <option value={1}>1 Hour</option>
+                <option value={24}>24 Hours</option>
+                <option value={168}>1 Week</option>
+              </select>
+            </div>
+            <div className="flex items-center pt-6">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  checked={announcementEnabled}
+                  onChange={(e) => setAnnouncementEnabled(e.target.checked)}
+                />
+                <span className="text-sm font-medium text-slate-700">Enable Announcement</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <p className="text-sm font-medium text-slate-700 mb-2">Preview:</p>
+            <div className={`rounded-md p-3 text-sm font-medium text-white ${
+              announcementType === "info" ? "bg-blue-600" :
+              announcementType === "warning" ? "bg-amber-500" :
+              announcementType === "error" ? "bg-red-600" :
+              "bg-emerald-600"
+            }`}>
+              <div dangerouslySetInnerHTML={{ __html: announcementMsg || "<em>No message</em>" }} />
+            </div>
+          </div>
+
+          <button
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={handlePublishAnnouncement}
+            disabled={!announcementMsg.trim()}
+          >
+            Publish Announcement
+          </button>
+        </div>
+      </SectionCard>
       {showWithdrawConfirm && (
         <ConfirmDialog
           open={true}

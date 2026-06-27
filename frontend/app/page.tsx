@@ -276,7 +276,7 @@ export default function HomePage() {
       }
       if (dateRange !== "all") {
         const threshold = dateThresholds[dateRange];
-        if (threshold !== undefined && job.created_at < threshold) return false;
+        if (threshold !== undefined && Number(job.created_at) < threshold) return false;
       }
       if (freelancerStatus === "unassigned" && job.freelancer) return false;
       if (freelancerStatus === "assigned" && !job.freelancer) return false;

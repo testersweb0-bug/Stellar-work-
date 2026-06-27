@@ -10,6 +10,7 @@ import {
   scValToNative,
   TransactionBuilder,
   xdr,
+  Horizon,
 } from "@stellar/stellar-sdk";
 import {
   getAddress,
@@ -63,6 +64,23 @@ export async function getPublicKey(): Promise<string | null> {
   }
   const addr = await getAddress();
   return addr.error ? null : addr.address;
+}
+
+export async function getNativeBalance(publicKey: string): Promise<string> {
+  try {
+    const horizonUrl =
+      getNetwork() === "mainnet"
+        ? "https://horizon.stellar.org"
+        : "https://horizon-testnet.stellar.org";
+    // We use Horizon.Server to get balances. The method is loadAccount.
+    const server = new Horizon.Server(horizonUrl);
+    const account = await server.loadAccount(publicKey);
+    const nativeBalance = account.balances.find((b) => b.asset_type === "native");
+    return nativeBalance ? nativeBalance.balance : "0";
+  } catch (e) {
+    console.error("Error fetching balance:", e);
+    return "0";
+  }
 }
 
 export async function signTransaction(xdrValue: string): Promise<string> {

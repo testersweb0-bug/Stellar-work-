@@ -12,7 +12,9 @@ import {
 import {
   connectWallet as stellarConnectWallet,
   getPublicKey,
+  getNativeBalance,
 } from "@/lib/stellar";
+import { toXlm } from "@/lib/format";
 
 // Storage keys
 const LAST_ACCOUNT_KEY = "stellarwork:last-connected-account";
@@ -150,6 +152,21 @@ export function WalletButton() {
   const { wallet, connectWallet, disconnectWallet } = useWallet();
   const [connecting, setConnecting] = useState(false);
   const [displayMode, setDisplayMode] = useState<WalletDisplayMode>("short");
+  const [balance, setBalance] = useState<string | null>(null);
+  const [fetchingBalance, setFetchingBalance] = useState(false);
+
+  const fetchBalance = useCallback(async () => {
+    if (!wallet) return;
+    setFetchingBalance(true);
+    try {
+      const bal = await getNativeBalance(wallet);
+      setBalance(toXlm(bal));
+    } catch {
+      setBalance("0.00");
+    } finally {
+      setFetchingBalance(false);
+    }
+  }, [wallet]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("wallet-display-mode");
@@ -161,8 +178,11 @@ export function WalletButton() {
   useEffect(() => {
     if (!wallet) {
       setDisplayMode("short");
+      setBalance(null);
+    } else {
+      fetchBalance();
     }
-  }, [wallet]);
+  }, [wallet, fetchBalance]);
 
   const toggleDisplayMode = useCallback(() => {
     setDisplayMode((current) => {
@@ -178,9 +198,25 @@ export function WalletButton() {
 
     return (
       <div className="flex items-center gap-2">
-        <span className="rounded-md bg-slate-100 px-3 py-1.5 font-mono text-xs text-slate-700">
-          {visibleAddress}
-        </span>
+        <div className="flex items-center gap-2 rounded-md bg-slate-100 px-3 py-1.5 text-xs text-slate-700">
+          {fetchingBalance ? (
+            <span className="h-4 w-12 animate-pulse rounded bg-slate-200" />
+          ) : (
+            <span className="font-semibold">{balance} XLM</span>
+          )}
+          <button
+            onClick={fetchBalance}
+            className="text-slate-400 hover:text-slate-600 focus:outline-none"
+            aria-label="Refresh balance"
+            disabled={fetchingBalance}
+          >
+            <svg className={`h-3 w-3 ${fetchingBalance ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+          <span className="text-slate-300">|</span>
+          <span className="font-mono">{visibleAddress}</span>
+        </div>
         <button
           type="button"
           onClick={toggleDisplayMode}
