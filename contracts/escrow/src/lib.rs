@@ -117,6 +117,12 @@ pub enum DataKey {
     ReferralEarnings(Address),
     ClientReferrer(Address),
     ReferralBonusPaid(Address),
+    // Issue #423: Access Control
+    Blacklisted(Address),
+    WhitelistMode,
+    Whitelisted(Address),
+    // Issue #427: Admin job views
+    AllJobIds,
 }
 
 #[contracterror]
@@ -147,6 +153,9 @@ pub enum Error {
     ReferralCodeAlreadyExists = 21,
     ReferralCodeNotFound = 22,
     InsufficientReferralEarnings = 23,
+    // Issue #423: Access Control
+    BlacklistedUser = 24,
+    NotWhitelisted = 25,
 }
 
 #[contract]
@@ -204,6 +213,7 @@ impl EscrowContract {
             panic_with_error!(&e, Error::DescriptionPayloadTooLarge);
         }
         client.require_auth();
+        require_active_access(&e, &client);
         if deadline != 0 && e.ledger().timestamp() > deadline {
             panic_with_error!(&e, Error::InvalidDeadline);
         }
@@ -233,6 +243,12 @@ impl EscrowContract {
         };
 
         set_job(&e, job_id, &job);
+        
+        let mut all_ids: Vec<u64> = e.storage().persistent().get(&DataKey::AllJobIds).unwrap_or(Vec::new(&e));
+        all_ids.push_back(job_id);
+        e.storage().persistent().set(&DataKey::AllJobIds, &all_ids);
+        e.storage().persistent().extend_ttl(&DataKey::AllJobIds, INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        
         bump_instance_ttl(&e);
 
         e.events().publish(
@@ -246,6 +262,7 @@ impl EscrowContract {
     pub fn accept_job(e: Env, freelancer: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         freelancer.require_auth();
+        require_active_access(&e, &freelancer);
 
         if job.status != JobStatus::Open {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -272,6 +289,7 @@ impl EscrowContract {
     pub fn submit_work(e: Env, freelancer: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         freelancer.require_auth();
+        require_active_access(&e, &freelancer);
 
         if job.status != JobStatus::InProgress {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -294,6 +312,7 @@ impl EscrowContract {
     pub fn approve_work(e: Env, client: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         client.require_auth();
+        require_active_access(&e, &client);
 
         if job.status != JobStatus::SubmittedForReview {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -378,6 +397,7 @@ impl EscrowContract {
     pub fn reject_work(e: Env, client: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         client.require_auth();
+        require_active_access(&e, &client);
 
         if job.status != JobStatus::SubmittedForReview {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -403,6 +423,7 @@ impl EscrowContract {
     pub fn cancel_job(e: Env, client: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         client.require_auth();
+        require_active_access(&e, &client);
 
         if job.status != JobStatus::Open {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -425,6 +446,7 @@ impl EscrowContract {
     pub fn freelancer_cancel_job(e: Env, freelancer: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         freelancer.require_auth();
+        require_active_access(&e, &freelancer);
 
         if job.status != JobStatus::InProgress {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -449,6 +471,7 @@ impl EscrowContract {
     pub fn enforce_deadline(e: Env, client: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         client.require_auth();
+        require_active_access(&e, &client);
 
         if job.client != client {
             panic_with_error!(&e, Error::Unauthorized);
@@ -482,7 +505,9 @@ impl EscrowContract {
         client_share_bps: i128,
     ) {
         client.require_auth();
+        require_active_access(&e, &client);
         freelancer.require_auth();
+        require_active_access(&e, &freelancer);
 
         let mut job = get_job_or_panic(&e, job_id);
 
@@ -523,6 +548,7 @@ impl EscrowContract {
 
     pub fn extend_job_ttl(e: Env, caller: Address, job_id: u64) {
         caller.require_auth();
+        require_active_access(&e, &caller);
         let job = get_job_or_panic(&e, job_id);
         if job.client != caller && job.freelancer != Option::Some(caller.clone()) {
             panic_with_error!(&e, Error::Unauthorized);
@@ -534,6 +560,7 @@ impl EscrowContract {
     pub fn raise_dispute(e: Env, caller: Address, job_id: u64) {
         let mut job = get_job_or_panic(&e, job_id);
         caller.require_auth();
+        require_active_access(&e, &caller);
 
         if job.status != JobStatus::InProgress && job.status != JobStatus::SubmittedForReview {
             panic_with_error!(&e, Error::InvalidStatus);
@@ -747,6 +774,7 @@ impl EscrowContract {
 
     pub fn store_description_cid(e: Env, caller: Address, desc_hash: BytesN<32>, cid: String) {
         caller.require_auth();
+        require_active_access(&e, &caller);
         if cid.is_empty() {
             panic_with_error!(&e, Error::InvalidDescriptionHash);
         }
@@ -1019,6 +1047,7 @@ impl EscrowContract {
     /// The `referrer` must auth.  Code is case-sensitive and globally unique.
     pub fn register_referral(e: Env, referrer: Address, code: String) {
         referrer.require_auth();
+        require_active_access(&e, &referrer);
         let key = DataKey::ReferralCode(code.clone());
         if e.storage().persistent().has(&key) {
             panic_with_error!(&e, Error::ReferralCodeAlreadyExists);
@@ -1077,6 +1106,7 @@ impl EscrowContract {
     /// Transfer all accrued referral earnings to `referrer`.
     pub fn withdraw_referral_earnings(e: Env, referrer: Address) {
         referrer.require_auth();
+        require_active_access(&e, &referrer);
         let key = DataKey::ReferralEarnings(referrer.clone());
         let earnings: i128 = e.storage().persistent().get(&key).unwrap_or(0i128);
         if earnings <= 0 {
@@ -1100,6 +1130,146 @@ impl EscrowContract {
             (Symbol::new(&e, "referral_withdrawn"),),
             (referrer, earnings),
         );
+    }
+    
+    // --- Access Control Endpoints ---
+    pub fn set_whitelist_mode(e: Env, admin: Address, enabled: bool) {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        e.storage().instance().set(&DataKey::WhitelistMode, &enabled);
+        bump_instance_ttl(&e);
+        e.events().publish((Symbol::new(&e, "whitelist_mode_toggled"),), (enabled,));
+    }
+
+    pub fn is_whitelist_mode_enabled(e: Env) -> bool {
+        e.storage().instance().get(&DataKey::WhitelistMode).unwrap_or(false)
+    }
+
+    pub fn add_to_blacklist(e: Env, admin: Address, address: Address) {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        e.storage().persistent().set(&DataKey::Blacklisted(address.clone()), &true);
+        e.storage().persistent().extend_ttl(&DataKey::Blacklisted(address.clone()), INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        e.events().publish((Symbol::new(&e, "user_blacklisted"),), (address,));
+    }
+
+    pub fn remove_from_blacklist(e: Env, admin: Address, address: Address) {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        e.storage().persistent().remove(&DataKey::Blacklisted(address.clone()));
+        e.events().publish((Symbol::new(&e, "user_removed_from_blacklist"),), (address,));
+    }
+
+    pub fn add_to_whitelist(e: Env, admin: Address, address: Address) {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        e.storage().persistent().set(&DataKey::Whitelisted(address.clone()), &true);
+        e.storage().persistent().extend_ttl(&DataKey::Whitelisted(address.clone()), INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+        e.events().publish((Symbol::new(&e, "user_whitelisted"),), (address,));
+    }
+
+    pub fn remove_from_whitelist(e: Env, admin: Address, address: Address) {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        e.storage().persistent().remove(&DataKey::Whitelisted(address.clone()));
+        e.events().publish((Symbol::new(&e, "user_removed_from_whitelist"),), (address,));
+    }
+
+    pub fn is_blacklisted(e: Env, address: Address) -> bool {
+        e.storage().persistent().get(&DataKey::Blacklisted(address)).unwrap_or(false)
+    }
+
+    pub fn is_whitelisted(e: Env, address: Address) -> bool {
+        e.storage().persistent().get(&DataKey::Whitelisted(address)).unwrap_or(false)
+    }
+
+    // --- Admin Job Views Endpoints ---
+    pub fn admin_get_all_jobs(e: Env, admin: Address, start_index: u32, limit: u32) -> Vec<Job> {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        let all_ids: Vec<u64> = e.storage().persistent().get(&DataKey::AllJobIds).unwrap_or(Vec::new(&e));
+        let mut jobs = Vec::new(&e);
+        if start_index >= all_ids.len() || limit == 0 {
+            return jobs;
+        }
+        let end = core::cmp::min(all_ids.len(), start_index.saturating_add(limit));
+        for i in start_index..end {
+            if let Some(job_id) = all_ids.get(i) {
+                jobs.push_back(get_job_or_panic(&e, job_id));
+            }
+        }
+        jobs
+    }
+
+    pub fn admin_get_job_count(e: Env, admin: Address) -> u64 {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        get_jobs_count(&e)
+    }
+
+    pub fn admin_get_jobs_by_status(e: Env, admin: Address, status: JobStatus, start_index: u32, limit: u32) -> Vec<Job> {
+        admin.require_auth();
+        let current_admin = load_admin(&e);
+        if admin != current_admin {
+            panic_with_error!(&e, Error::UnauthorizedAdmin);
+        }
+        let all_ids: Vec<u64> = e.storage().persistent().get(&DataKey::AllJobIds).unwrap_or(Vec::new(&e));
+        let mut jobs = Vec::new(&e);
+        if start_index >= all_ids.len() || limit == 0 {
+            return jobs;
+        }
+        let mut match_count = 0;
+        let mut returned_count = 0;
+        for i in 0..all_ids.len() {
+            if let Some(job_id) = all_ids.get(i) {
+                if let Some(job) = e.storage().persistent().get::<DataKey, Job>(&DataKey::Job(job_id)) {
+                    if job.status == status {
+                        if match_count >= start_index {
+                            jobs.push_back(job);
+                            returned_count += 1;
+                            if returned_count == limit {
+                                break;
+                            }
+                        }
+                        match_count += 1;
+                    }
+                }
+            }
+        }
+        jobs
+    }
+}
+
+fn require_active_access(e: &Env, address: &Address) {
+    if e.storage().persistent().get(&DataKey::Blacklisted(address.clone())).unwrap_or(false) {
+        panic_with_error!(e, Error::BlacklistedUser);
+    }
+    let whitelist_mode: bool = e.storage().instance().get(&DataKey::WhitelistMode).unwrap_or(false);
+    if whitelist_mode {
+        if !e.storage().persistent().get(&DataKey::Whitelisted(address.clone())).unwrap_or(false) {
+            panic_with_error!(e, Error::NotWhitelisted);
+        }
     }
 }
 

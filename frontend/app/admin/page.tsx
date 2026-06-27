@@ -2,10 +2,16 @@
 
 import {
   getFees,
-  getJob,
-  getJobCount,
   getNativeToken,
   withdrawFees,
+  adminGetAllJobs,
+  adminGetJobCount,
+  setWhitelistMode,
+  addToBlacklist,
+  removeFromBlacklist,
+  addToWhitelist,
+  removeFromWhitelist,
+  isWhitelistModeEnabled,
 } from "@/lib/contract";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import EmptyState from "@/components/EmptyState";
@@ -56,6 +62,11 @@ export default function AdminPage() {
   const [announcementEnabled, setAnnouncementEnabled] = useState(false);
   const [announcementTtl, setAnnouncementTtl] = useState<number>(0);
 
+  // Access Control state
+  const [accessTarget, setAccessTarget] = useState("");
+  const [isWhitelistMode, setIsWhitelistMode] = useState(false);
+  const [accessUpdating, setAccessUpdating] = useState(false);
+
   const fetchAdminData = useCallback(async (walletAddress: string) => {
     setLoading(true);
     setError(null);
@@ -67,20 +78,22 @@ export default function AdminPage() {
       const accrued = await getFees(token);
       setFees(BigInt(accrued));
 
-      const count = await getJobCount();
-      const fetched: Array<{ id: number; job: Job }> = [];
-      for (let id = 1; id <= count; id += 1) {
-        const job = await getJob(String(id));
-        if (job) fetched.push({ id, job });
-      }
-      setJobs(fetched);
-
       const envAdmin = process.env.NEXT_PUBLIC_ADMIN_ADDRESS;
+      let actualAdmin = walletAddress;
       if (envAdmin) {
         setIsAdmin(walletAddress === envAdmin);
+        actualAdmin = envAdmin;
       } else {
         setIsAdmin(true);
       }
+
+      const count = await adminGetJobCount(actualAdmin);
+      const jobsList = await adminGetAllJobs(actualAdmin, 0, count);
+      const fetched = jobsList.map((job, idx) => ({ id: idx + 1, job }));
+      setJobs(fetched);
+
+      const whitelistMode = await isWhitelistModeEnabled();
+      setIsWhitelistMode(whitelistMode);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load admin data.");
       setIsAdmin(false);
@@ -177,6 +190,43 @@ export default function AdminPage() {
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (e) {
       setError("Failed to publish announcement.");
+    }
+  };
+
+  const handleAccessAction = async (action: "addBlacklist" | "removeBlacklist" | "addWhitelist" | "removeWhitelist") => {
+    if (!wallet || !accessTarget) return;
+    setAccessUpdating(true);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const actualAdmin = process.env.NEXT_PUBLIC_ADMIN_ADDRESS || wallet;
+      if (action === "addBlacklist") await addToBlacklist(actualAdmin, accessTarget);
+      else if (action === "removeBlacklist") await removeFromBlacklist(actualAdmin, accessTarget);
+      else if (action === "addWhitelist") await addToWhitelist(actualAdmin, accessTarget);
+      else if (action === "removeWhitelist") await removeFromWhitelist(actualAdmin, accessTarget);
+      setSuccessMessage(`Successfully processed ${action} for ${accessTarget}`);
+      setAccessTarget("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Access control action failed.");
+    } finally {
+      setAccessUpdating(false);
+    }
+  };
+
+  const handleToggleWhitelistMode = async () => {
+    if (!wallet) return;
+    setAccessUpdating(true);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const actualAdmin = process.env.NEXT_PUBLIC_ADMIN_ADDRESS || wallet;
+      await setWhitelistMode(actualAdmin, !isWhitelistMode);
+      setIsWhitelistMode(!isWhitelistMode);
+      setSuccessMessage(`Whitelist mode ${!isWhitelistMode ? "enabled" : "disabled"}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to toggle whitelist mode.");
+    } finally {
+      setAccessUpdating(false);
     }
   };
 
@@ -341,6 +391,71 @@ export default function AdminPage() {
           >
             Publish Announcement
           </button>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Access Control">
+        <div className="space-y-4 mt-4">
+          <div className="flex items-center justify-between p-4 border border-slate-200 rounded-md bg-slate-50">
+            <div>
+              <p className="font-medium text-slate-900">Whitelist Mode</p>
+              <p className="text-sm text-slate-500">If enabled, only whitelisted users can interact with the platform.</p>
+            </div>
+            <button
+              onClick={handleToggleWhitelistMode}
+              disabled={accessUpdating}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                isWhitelistMode ? "bg-slate-900" : "bg-slate-300"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                isWhitelistMode ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700">Target Address</label>
+            <input
+              type="text"
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+              value={accessTarget}
+              onChange={(e) => setAccessTarget(e.target.value)}
+              placeholder="G..."
+            />
+          </div>
+          
+          <div className="flex flex-wrap gap-2 pt-2">
+            <button
+              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              onClick={() => handleAccessAction("addBlacklist")}
+              disabled={!accessTarget || accessUpdating}
+            >
+              Blacklist
+            </button>
+            <button
+              className="rounded-md border border-red-600 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+              onClick={() => handleAccessAction("removeBlacklist")}
+              disabled={!accessTarget || accessUpdating}
+            >
+              Un-Blacklist
+            </button>
+            <div className="w-px bg-slate-200 mx-2" />
+            <button
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              onClick={() => handleAccessAction("addWhitelist")}
+              disabled={!accessTarget || accessUpdating}
+            >
+              Whitelist
+            </button>
+            <button
+              className="rounded-md border border-slate-900 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+              onClick={() => handleAccessAction("removeWhitelist")}
+              disabled={!accessTarget || accessUpdating}
+            >
+              Un-Whitelist
+            </button>
+          </div>
         </div>
       </SectionCard>
       {showWithdrawConfirm && (

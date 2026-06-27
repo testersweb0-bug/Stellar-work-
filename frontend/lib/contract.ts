@@ -293,3 +293,113 @@ export async function getMilestones(jobId: string): Promise<Milestone[] | null> 
     return null;
   }
 }
+
+// --- Admin Job Views ---
+
+export async function adminGetAllJobs(admin: string, startIndex: number, limit: number): Promise<Job[]> {
+  const response = await callContract(
+    requireContractId(),
+    "admin_get_all_jobs",
+    [
+      nativeToScVal(admin, { type: "address" }),
+      nativeToScVal(startIndex, { type: "u32" }),
+      nativeToScVal(limit, { type: "u32" }),
+    ],
+    { readOnly: true },
+  );
+  return (response.data as Job[]) ?? [];
+}
+
+export async function adminGetJobCount(admin: string): Promise<number> {
+  const response = await callContract(
+    requireContractId(),
+    "admin_get_job_count",
+    [nativeToScVal(admin, { type: "address" })],
+    { readOnly: true },
+  );
+  return Number(response.data ?? 0);
+}
+
+export async function adminGetJobsByStatus(admin: string, status: string, startIndex: number, limit: number): Promise<Job[]> {
+  const response = await callContract(
+    requireContractId(),
+    "admin_get_jobs_by_status",
+    [
+      nativeToScVal(admin, { type: "address" }),
+      // For enums, nativeToScVal converts the string literal cleanly for Soroban
+      nativeToScVal(status, { type: "symbol" }),
+      nativeToScVal(startIndex, { type: "u32" }),
+      nativeToScVal(limit, { type: "u32" }),
+    ],
+    { readOnly: true },
+  );
+  return (response.data as Job[]) ?? [];
+}
+
+// --- Access Control ---
+
+export async function setWhitelistMode(admin: string, enabled: boolean) {
+  return callContract(requireContractId(), "set_whitelist_mode", [
+    nativeToScVal(admin, { type: "address" }),
+    nativeToScVal(enabled, { type: "bool" }),
+  ]);
+}
+
+export async function isWhitelistModeEnabled(): Promise<boolean> {
+  const response = await callContract(
+    requireContractId(),
+    "is_whitelist_mode_enabled",
+    [],
+    { readOnly: true },
+  );
+  return Boolean(response.data ?? false);
+}
+
+export async function addToBlacklist(admin: string, address: string) {
+  return callContract(requireContractId(), "add_to_blacklist", [
+    nativeToScVal(admin, { type: "address" }),
+    nativeToScVal(address, { type: "address" }),
+  ]);
+}
+
+export async function removeFromBlacklist(admin: string, address: string) {
+  return callContract(requireContractId(), "remove_from_blacklist", [
+    nativeToScVal(admin, { type: "address" }),
+    nativeToScVal(address, { type: "address" }),
+  ]);
+}
+
+export async function addToWhitelist(admin: string, address: string) {
+  return callContract(requireContractId(), "add_to_whitelist", [
+    nativeToScVal(admin, { type: "address" }),
+    nativeToScVal(address, { type: "address" }),
+  ]);
+}
+
+export async function removeFromWhitelist(admin: string, address: string) {
+  return callContract(requireContractId(), "remove_from_whitelist", [
+    nativeToScVal(admin, { type: "address" }),
+    nativeToScVal(address, { type: "address" }),
+  ]);
+}
+
+export async function isBlacklisted(address: string): Promise<boolean> {
+  const response = await callContract(
+    requireContractId(),
+    "is_blacklisted",
+    [nativeToScVal(address, { type: "address" })],
+    { readOnly: true },
+  );
+  return Boolean(response.data ?? false);
+}
+
+export async function isWhitelisted(address: string): Promise<boolean> {
+  const response = await callContract(
+    requireContractId(),
+    "is_whitelisted",
+    [nativeToScVal(address, { type: "address" })],
+    { readOnly: true },
+  );
+  return Boolean(response.data ?? false);
+}
+

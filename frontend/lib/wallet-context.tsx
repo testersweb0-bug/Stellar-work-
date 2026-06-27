@@ -24,7 +24,7 @@ interface WalletContextType {
   wallet: string | null;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
-  switchAccount: (address: string) => Promise<void>;
+  switchAccount: (address?: string) => Promise<void>;
   clearCachedData: () => void;
   isSwitching: boolean;
 }

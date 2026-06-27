@@ -162,7 +162,7 @@ export default function DashboardPage() {
       await handleAction(
         () => freelancerCancelJob(wallet, String(jobId)),
         jobId,
-        null,
+        undefined
       );
     }
   };
@@ -209,7 +209,7 @@ export default function DashboardPage() {
           await handleAction(
             () => freelancerCancelJob(wallet, String(jobId)),
             jobId,
-            null,
+            undefined
           );
         }
         setPendingAction(null);
@@ -429,7 +429,7 @@ export default function DashboardPage() {
             variant: "danger" as const,
             suppressKey: CONFIRM_KEYS.freelancerCancelJob,
           },
-        } as const;
+        };
         const cfg = configs[type];
         return (
           <ConfirmDialog
@@ -466,7 +466,7 @@ function JobSection({
   wallet: string;
   role: "client" | "freelancer";
   actionLoading: number | null;
-  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string } | null) => Promise<void>;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
   onRequestAction: (type: PendingDashAction["type"], jobId: number, amountXlm: string) => void;
   onClearFilter: () => void;
 }) {
@@ -523,7 +523,7 @@ function JobCard({
   wallet: string;
   role: "client" | "freelancer";
   isLoading: boolean;
-  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string } | null) => Promise<void>;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
   onRequestAction: (type: PendingDashAction["type"], jobId: number, amountXlm: string) => void;
 }) {
   const actions = getActions(id, job, wallet, role);
@@ -602,7 +602,7 @@ function JobCard({
 type Action = {
   label: string;
   fn: () => Promise<unknown>;
-  notification: { event: NotificationEvent; message: string } | null;
+  notification?: { event: NotificationEvent; message: string };
 };
 
 function getActions(
@@ -633,7 +633,7 @@ function getActions(
       actions.push({
         label: "Enforce Deadline",
         fn: () => enforceDeadline(wallet, jobId),
-        notification: null,
+        notification: undefined,
       });
     }
   }
@@ -648,7 +648,7 @@ function getActions(
       actions.push({
         label: "Cancel Job",
         fn: () => freelancerCancelJob(wallet, jobId),
-        notification: null,
+        notification: undefined,
       });
     }
   }
