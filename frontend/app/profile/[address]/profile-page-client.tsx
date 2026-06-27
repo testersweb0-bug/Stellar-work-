@@ -469,12 +469,15 @@ export default function ProfilePageClient({ address }: { address: string }) {
               Edit Portfolio
             </button>
           )}
-          {!isOwner && (
+          {!isOwner && wallet && (
             <Link
-              href={`/profile/${address}`}
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              href={`/messages/${address}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 transition-colors"
             >
-              View Portfolio
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14 10c0 2.21-2.686 4-6 4a7.232 7.232 0 01-3.115-.674L2 14l.897-2.392A3.954 3.954 0 012 10c0-2.21 2.686-4 6-4s6 1.79 6 4z" />
+              </svg>
+              Message
             </Link>
           )}
         </div>

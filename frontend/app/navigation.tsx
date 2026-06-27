@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWallet, WalletButton } from "@/lib/wallet-context";
+import { useMessaging } from "@/lib/messaging-context";
 import { useState, useEffect, useRef } from "react";
 import NetworkBadge from "@/components/NetworkBadge";
 import NotificationInbox from "@/components/NotificationInbox";
@@ -11,6 +12,7 @@ import WalletMenu from "@/components/WalletMenu";
 export function Navigation() {
   const pathname = usePathname();
   const { wallet } = useWallet();
+  const { unreadCount } = useMessaging();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -88,6 +90,7 @@ export function Navigation() {
     { href: "/dashboard", label: "Dashboard" },
     { href: "/transactions", label: "Transactions" },
     { href: "/disputes", label: "Disputes" },
+    { href: "/messages", label: "Messages" },
   ];
 
   if (showAdmin) {
@@ -137,7 +140,17 @@ export function Navigation() {
                 aria-label={shortcut ? `${label} (shortcut: ${shortcut})` : label}
                 aria-current={isActive(href) ? "page" : undefined}
               >
-                {label}
+                <span className="relative inline-flex items-center gap-1">
+                  {label}
+                  {href === "/messages" && unreadCount > 0 && (
+                    <span
+                      className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-bold text-white"
+                      aria-label={`${unreadCount} unread messages`}
+                    >
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </span>
                 {shortcut && (
                   <kbd className="ml-1 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[10px] font-medium text-slate-400">
                     {shortcut}
@@ -220,7 +233,17 @@ export function Navigation() {
                   menuButtonRef.current?.focus();
                 }}
               >
-                {label}
+                <span className="inline-flex items-center gap-1.5">
+                  {label}
+                  {href === "/messages" && unreadCount > 0 && (
+                    <span
+                      className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-bold text-white"
+                      aria-label={`${unreadCount} unread messages`}
+                    >
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
+                </span>
                 {shortcut && (
                   <kbd className="ml-1 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[10px] font-medium text-slate-400">
                     {shortcut}
