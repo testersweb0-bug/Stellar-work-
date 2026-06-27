@@ -4,10 +4,8 @@ import {
   Account,
   BASE_FEE,
   Contract,
-  Keypair,
   Networks,
   nativeToScVal,
-  Operation,
   rpc,
   scValToNative,
   TransactionBuilder,
@@ -23,13 +21,21 @@ import {
 const getRpcUrl = () =>
   process.env.NEXT_PUBLIC_SOROBAN_RPC ?? "https://soroban-testnet.stellar.org";
 
-const getNetworkPassphrase = () =>
-  process.env.NEXT_PUBLIC_NETWORK === "mainnet"
-    ? Networks.PUBLIC
-    : Networks.TESTNET;
+export type StellarNetwork = "mainnet" | "testnet";
 
-export const getNetwork = () =>
-  process.env.NEXT_PUBLIC_NETWORK === "mainnet" ? "mainnet" : "testnet";
+export function getConfiguredNetwork(): StellarNetwork | null {
+  const value = process.env.NEXT_PUBLIC_NETWORK;
+  if (value === "mainnet" || value === "testnet") {
+    return value;
+  }
+  return null;
+}
+
+const getNetworkPassphrase = () =>
+  getConfiguredNetwork() === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+
+export const getNetwork = (): StellarNetwork =>
+  getConfiguredNetwork() ?? "testnet";
 
 const DEFAULT_POLL_TIMEOUT = 30000;
 const DEFAULT_POLL_INTERVAL = 3000;
@@ -39,7 +45,7 @@ interface TransactionResult {
   hash?: string;
   errorResult?: string;
   resultMetaXdr?: string;
-  data?: any;
+  data?: unknown;
 }
 
 export async function connectWallet(): Promise<string> {
@@ -69,7 +75,8 @@ export async function signTransaction(xdrValue: string): Promise<string> {
   return "signedTxXdr" in signed ? signed.signedTxXdr : signed;
 }
 
-const READONLY_SOURCE = Keypair.random().publicKey();
+// Use a stable placeholder account for read-only simulations when no wallet is connected.
+const READONLY_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 export async function callContract(
   contractId: string,
@@ -129,11 +136,11 @@ export async function callContract(
   const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
   const sent = await server.sendTransaction(signedTx);
 
-  if (sent.status === rpc.Api.SendTransactionStatus.ERROR) {
+  if (sent.status === "ERROR") {
     throw new Error(sent.errorResult?.toXDR().toString() ?? "Contract invocation failed.");
   }
 
-  if (sent.status === rpc.Api.SendTransactionStatus.PENDING) {
+  if (sent.status === "PENDING") {
     const pollTimeout = options?.pollTimeout ?? DEFAULT_POLL_TIMEOUT;
     const pollInterval = DEFAULT_POLL_INTERVAL;
     const startTime = Date.now();

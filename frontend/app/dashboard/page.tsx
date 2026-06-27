@@ -3,6 +3,7 @@
 import {
   approveWork,
   cancelJob,
+  freelancerCancelJob,
   getJob,
   getJobCount,
   getCompletedJobsCount,
@@ -13,11 +14,16 @@ import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
 import EmptyState from "@/components/EmptyState";
 import ErrorBanner from "@/components/ErrorBanner";
 import ExportButton from "@/components/ExportButton";
+import InfoTooltip from "@/components/InfoTooltip";
+import JobCardSkeleton from "@/components/JobCardSkeleton";
+import NoResultsState from "@/components/NoResultsState";
 import SectionCard from "@/components/SectionCard";
+import StatusPill from "@/components/StatusPill";
 import { useToast } from "@/components/ToastProvider";
-import { toXlm } from "@/lib/format";
+import { useNotifications, getEventLabel } from "@/lib/notifications-context";
+import { formatDeadline, toXlm } from "@/lib/format";
 import { useWallet } from "@/lib/wallet-context";
-import type { Job, JobStatus } from "@/lib/types";
+import type { Job, JobStatus, NotificationEvent } from "@/lib/types";
 import { useEffect, useState, useCallback, useRef, type KeyboardEvent } from "react";
 
 const STATUS_OPTIONS: JobStatus[] = [
@@ -28,6 +34,15 @@ const STATUS_OPTIONS: JobStatus[] = [
   "Cancelled",
 ];
 
+const EVENT_DOT: Record<string, string> = {
+  job_accepted: "bg-blue-500",
+  work_submitted: "bg-amber-500",
+  work_approved: "bg-emerald-500",
+  job_cancelled: "bg-slate-500",
+  dispute_raised: "bg-red-500",
+  dispute_resolved: "bg-violet-500",
+};
+
 const STATUS_LABELS: Record<JobStatus, string> = {
   Open: "Open",
   InProgress: "In Progress",
@@ -37,23 +52,10 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   Disputed: "Disputed",
 };
 
-const STATUS_COLORS: Record<JobStatus, string> = {
-  Open: "bg-blue-100 text-blue-800",
-  InProgress: "bg-yellow-100 text-yellow-800",
-  SubmittedForReview: "bg-purple-100 text-purple-800",
-  Completed: "bg-green-100 text-green-800",
-  Cancelled: "bg-red-100 text-red-800",
-  Disputed: "bg-orange-100 text-orange-800",
-};
-
-function formatDeadline(deadline: string) {
-  if (deadline === "0") return "No deadline";
-  return new Date(Number(deadline) * 1000).toLocaleDateString();
-}
-
 export default function DashboardPage() {
   const { wallet, connectWallet } = useWallet();
   const { showSuccess, showError } = useToast();
+  const { notifications, addNotification } = useNotifications();
   const [allJobs, setAllJobs] = useState<Array<{ id: number; job: Job }>>([]);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "All">("All");
   const [loading, setLoading] = useState(false);
@@ -105,13 +107,18 @@ export default function DashboardPage() {
   const handleAction = async (
     fn: () => Promise<unknown>,
     jobId: number,
-    successMessage = "Action completed successfully.",
+    notification?: { event: NotificationEvent; message: string },
   ) => {
     setActionLoading(jobId);
+    setError(null);
     try {
       await fn();
+      if (notification) {
+        addNotification(notification.event, jobId, notification.message);
+      }
       await fetchJobs();
-      showSuccess(successMessage);
+      setError(null);
+      showSuccess("Action completed successfully.");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Action failed.";
       setError(message);
@@ -129,7 +136,7 @@ export default function DashboardPage() {
     await handleAction(
       () => cancelJob(wallet, String(jobId)),
       jobId,
-      "Job cancelled and funds refunded.",
+      { event: "job_cancelled", message: `Job #${jobId} was cancelled and funds refunded.` },
     );
     setPendingCancelJobId(null);
   };
@@ -200,11 +207,47 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Activity Feed */}
+      {notifications.length > 0 && (
+        <SectionCard className="overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
+            <span className="text-xs text-slate-400">{notifications.length} event{notifications.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {notifications.slice(0, 10).map((n) => {
+              const dot = EVENT_DOT[n.event] ?? "bg-slate-400";
+              return (
+                <div
+                  key={n.id}
+                  className={`flex items-start gap-3 px-5 py-3 ${n.seen ? "" : "bg-blue-50/50"}`}
+                >
+                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-800">{n.message}</p>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {getEventLabel(n.event)} &middot; {new Date(n.timestamp).toLocaleDateString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
+
       <div
         className="flex flex-wrap gap-2"
         role="toolbar"
         aria-label="Filter jobs by status"
       >
+        <div className="mr-1 flex items-center gap-2 text-sm text-slate-600">
+          <span>Filter:</span>
+          <InfoTooltip
+            label="Filter jobs by status help"
+            content="Use the status chips to narrow your job history. Arrow keys move between filters."
+          />
+        </div>
         {filterOptions.map((s, index) => (
           <button
             key={s}
@@ -224,30 +267,48 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-      {loading && <p className="text-sm text-slate-600">Loading jobs...</p>}
+      {error && (
+        <ErrorBanner
+          message={error}
+          onDismiss={() => setError(null)}
+          onRetry={() => void fetchJobs()}
+        />
+      )}
+      {loading && (
+        <div className="grid gap-4 md:grid-cols-2" aria-label="Loading jobs">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <JobCardSkeleton key={index} />
+          ))}
+        </div>
+      )}
 
       {!loading && (
         <>
           <JobSection
             title="Posted Jobs"
             subtitle="Jobs you created as a client"
+            allJobs={postedJobs}
             jobs={filteredPosted}
+            filterActive={statusFilter !== "All"}
             wallet={wallet}
             role="client"
             actionLoading={actionLoading}
             onAction={handleAction}
             onRequestCancel={setPendingCancelJobId}
+            onClearFilter={() => setStatusFilter("All")}
           />
           <JobSection
             title="Accepted Jobs"
             subtitle="Jobs you accepted as a freelancer"
+            allJobs={acceptedJobs}
             jobs={filteredAccepted}
+            filterActive={statusFilter !== "All"}
             wallet={wallet}
             role="freelancer"
             actionLoading={actionLoading}
             onAction={handleAction}
             onRequestCancel={setPendingCancelJobId}
+            onClearFilter={() => setStatusFilter("All")}
           />
         </>
       )}
@@ -269,31 +330,46 @@ export default function DashboardPage() {
 function JobSection({
   title,
   subtitle,
+  allJobs,
   jobs,
+  filterActive,
   wallet,
   role,
   actionLoading,
   onAction,
   onRequestCancel,
+  onClearFilter,
 }: {
   title: string;
   subtitle: string;
+  allJobs: Array<{ id: number; job: Job }>;
   jobs: Array<{ id: number; job: Job }>;
+  filterActive: boolean;
   wallet: string;
   role: "client" | "freelancer";
   actionLoading: number | null;
-  onAction: (fn: () => Promise<unknown>, jobId: number) => Promise<void>;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
   onRequestCancel: (jobId: number) => void;
+  onClearFilter: () => void;
 }) {
   return (
     <div>
       <h2 className="text-lg font-semibold">{title}</h2>
       <p className="mb-3 text-sm text-slate-500">{subtitle}</p>
       {jobs.length === 0 ? (
-        <EmptyState
-          title="No jobs yet"
-          description="No jobs match this filter yet."
-        />
+        filterActive && allJobs.length > 0 ? (
+          <NoResultsState
+            title="No jobs match this filter"
+            description="Try a different status or clear the filter to show every job in this section."
+            actionLabel="Clear filter"
+            onAction={onClearFilter}
+          />
+        ) : (
+          <EmptyState
+            title="No jobs yet"
+            description="No jobs match this filter yet."
+          />
+        )
       ) : (
         <ul className="grid list-none gap-4 sm:grid-cols-2" aria-label={title}>
           {jobs.map(({ id, job }) => (
@@ -329,7 +405,7 @@ function JobCard({
   wallet: string;
   role: "client" | "freelancer";
   isLoading: boolean;
-  onAction: (fn: () => Promise<unknown>, jobId: number) => Promise<void>;
+  onAction: (fn: () => Promise<unknown>, jobId: number, notification?: { event: NotificationEvent; message: string }) => Promise<void>;
   onRequestCancel: (jobId: number) => void;
 }) {
   const actions = getActions(id, job, wallet, role);
@@ -338,11 +414,7 @@ function JobCard({
     <article className="interactive-card h-full p-4">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-medium">Job #{id}</h3>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[job.status]}`}
-        >
-          {STATUS_LABELS[job.status]}
-        </span>
+        <StatusPill status={job.status} />
       </div>
       <div className="mt-2 space-y-1 text-sm text-slate-600">
         <p className="flex min-w-0 items-baseline gap-1">
@@ -351,7 +423,16 @@ function JobCard({
           </span>
           <span className="shrink-0">XLM</span>
         </p>
-        <p>Deadline: {formatDeadline(job.deadline)}</p>
+        <p className="truncate font-mono text-xs text-slate-400">
+          Token: {job.token ? `${job.token.slice(0, 8)}...${job.token.slice(-4)}` : "N/A"}
+        </p>
+        <p>
+          {(() => {
+            const deadline = formatDeadline(job.deadline);
+            if (!deadline) return "Deadline: No deadline";
+            return `Deadline: ${deadline.isPast ? "Past due" : deadline.relative} • ${deadline.exact}`;
+          })()}
+        </p>
         {role === "client" && job.freelancer && (
           <p className="truncate">Freelancer: {job.freelancer}</p>
         )}
@@ -371,7 +452,7 @@ function JobCard({
                   onRequestCancel(id);
                   return;
                 }
-                void onAction(() => action.fn(), id);
+                void onAction(() => action.fn(), id, action.notification ?? undefined);
               }}
               title={action.label}
               aria-haspopup={action.label === "Cancel Job" ? "dialog" : undefined}
@@ -385,30 +466,57 @@ function JobCard({
   );
 }
 
+type Action = {
+  label: string;
+  fn: () => Promise<unknown>;
+  notification: { event: NotificationEvent; message: string } | null;
+};
+
 function getActions(
   id: number,
   job: Job,
   wallet: string,
   role: "client" | "freelancer",
-): Array<{ label: string; fn: () => Promise<unknown> }> {
-  const actions: Array<{ label: string; fn: () => Promise<unknown> }> = [];
+): Action[] {
+  const actions: Action[] = [];
   const jobId = String(id);
 
   if (role === "client") {
     if (job.status === "Open") {
-      actions.push({ label: "Cancel Job", fn: () => cancelJob(wallet, jobId) });
+      actions.push({
+        label: "Cancel Job",
+        fn: () => cancelJob(wallet, jobId),
+        notification: { event: "job_cancelled", message: `Job #${id} was cancelled and funds refunded.` },
+      });
     }
     if (job.status === "SubmittedForReview") {
-      actions.push({ label: "Approve Work", fn: () => approveWork(wallet, jobId) });
+      actions.push({
+        label: "Approve Work",
+        fn: () => approveWork(wallet, jobId),
+        notification: { event: "work_approved", message: `Work for Job #${id} was approved and payment released.` },
+      });
     }
     if (job.status === "InProgress" && job.deadline !== "0") {
-      actions.push({ label: "Enforce Deadline", fn: () => enforceDeadline(wallet, jobId) });
+      actions.push({
+        label: "Enforce Deadline",
+        fn: () => enforceDeadline(wallet, jobId),
+        notification: null,
+      });
     }
   }
 
   if (role === "freelancer") {
     if (job.status === "InProgress") {
-      actions.push({ label: "Submit Work", fn: () => submitWork(wallet, jobId) });
+      actions.push({
+        label: "Submit Work",
+        fn: () => submitWork(wallet, jobId),
+        notification: { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
+      });
+      actions.push({
+        label: "Cancel Job",
+        fn: () => freelancerCancelJob(wallet, jobId),
+        notification: null,
+      });
     }
   }
 

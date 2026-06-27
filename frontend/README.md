@@ -53,11 +53,12 @@ Open [http://localhost:3000](http://localhost:3000).
 | Variable | Required | Description |
 |---|---|---|
 | `NEXT_PUBLIC_CONTRACT_ID` | ✅ | Deployed escrow contract ID on Stellar |
-| `NEXT_PUBLIC_NETWORK` | ✅ | `testnet` or `mainnet` |
-| `NEXT_PUBLIC_HORIZON_URL` | ✅ | Horizon RPC endpoint |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL` | ✅ | Soroban RPC endpoint |
+| `NEXT_PUBLIC_NETWORK` |  | `testnet` or `mainnet`; defaults to `testnet` |
+| `NEXT_PUBLIC_SOROBAN_RPC` |  | Soroban RPC endpoint; defaults to `https://soroban-testnet.stellar.org` |
+| `NEXT_PUBLIC_NATIVE_TOKEN` |  | Optional token contract address used to prefill the Post Job form |
+| `NEXT_PUBLIC_ADMIN_ADDRESS` |  | Optional admin Stellar address used to gate the Admin UI |
 
-Copy `.env.example` to `.env.local` and fill in the values. The contract ID is printed after running `soroban contract deploy` — see the root [README](../README.md) for the full deploy flow.
+Copy `.env.example` to `.env.local` and fill in the values. The contract ID is printed after running `soroban contract deploy` — see the root [README](../README.md) for the full deploy flow and [Environment Reference](../docs/environments.md) for defaults plus Testnet/Mainnet notes.
 
 ## Available Scripts
 

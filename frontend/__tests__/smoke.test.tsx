@@ -10,6 +10,14 @@ vi.mock("@/lib/contract", () => ({
   getJobCount: (...args: unknown[]) => mockGetJobCount(...args),
   getJob: (...args: unknown[]) => mockGetJob(...args),
   acceptJob: vi.fn(),
+  freelancerCancelJob: vi.fn(),
+  getDescriptionCid: vi.fn(),
+  storeDescriptionCid: vi.fn(),
+}));
+
+vi.mock("@/lib/ipfs-service", () => ({
+  uploadToIpfs: vi.fn(),
+  fetchFromIpfs: vi.fn(),
 }));
 
 vi.mock("@/lib/wallet-context", () => ({
@@ -17,6 +25,21 @@ vi.mock("@/lib/wallet-context", () => ({
     wallet: null,
     connectWallet: vi.fn(),
   }),
+}));
+
+vi.mock("@/lib/notifications-context", () => ({
+  useNotifications: () => ({
+    notifications: [],
+    unreadCount: 0,
+    addNotification: vi.fn(),
+    markAsSeen: vi.fn(),
+    markAllAsSeen: vi.fn(),
+    preferences: { job_accepted: true, work_submitted: true, work_approved: true, job_cancelled: true, dispute_raised: true, dispute_resolved: true },
+    setPreference: vi.fn(),
+    clearNotifications: vi.fn(),
+  }),
+  NotificationProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  getEventLabel: (event: string) => event,
 }));
 
 describe("Home page render states", () => {
@@ -140,6 +163,123 @@ describe("Home page render states", () => {
     expect(screen.queryByRole("heading", { name: "Job #1" })).not.toBeInTheDocument();
   });
 
+  it("marks newly loaded jobs after refresh and clears after view", async () => {
+    mockGetJobCount.mockResolvedValue(1);
+    mockGetJob.mockResolvedValue({
+      client: "GCLIENT",
+      freelancer: null,
+      amount: "10000000",
+      description_hash: "hash-one",
+      status: "Open",
+      created_at: "1710000001",
+      deadline: "0",
+      token: "GTOKEN",
+      revision_count: 0,
+    });
+
+    render(<HomePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Job #1" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("New")).not.toBeInTheDocument();
+
+    mockGetJobCount.mockResolvedValue(2);
+    mockGetJob
+      .mockResolvedValueOnce({
+        client: "GCLIENT",
+        freelancer: null,
+        amount: "25000000",
+        description_hash: "hash-two",
+        status: "Open",
+        created_at: "1710000000",
+        deadline: "0",
+        token: "GTOKEN",
+        revision_count: 0,
+      })
+      .mockResolvedValueOnce({
+        client: "GCLIENT",
+        freelancer: null,
+        amount: "10000000",
+        description_hash: "hash-one",
+        status: "Open",
+        created_at: "1710000001",
+        deadline: "0",
+        token: "GTOKEN",
+        revision_count: 0,
+      });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("1 new job since last refresh")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("New")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("link", { name: /Job #2/i }));
+
+    await waitFor(() => expect(screen.queryByText("New")).not.toBeInTheDocument());
+  });
+
+  it("shows new job indicators with favorites filter applied", async () => {
+    mockGetJobCount.mockResolvedValue(1);
+    mockGetJob.mockResolvedValue({
+      client: "GCLIENT",
+      freelancer: null,
+      amount: "10000000",
+      description_hash: "hash-one",
+      status: "Open",
+      created_at: "1710000001",
+      deadline: "0",
+      token: "GTOKEN",
+      revision_count: 0,
+    });
+
+    render(<HomePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Job #1" })).toBeInTheDocument(),
+    );
+
+    mockGetJobCount.mockResolvedValue(2);
+    mockGetJob
+      .mockResolvedValueOnce({
+        client: "GCLIENT",
+        freelancer: null,
+        amount: "25000000",
+        description_hash: "hash-two",
+        status: "Open",
+        created_at: "1710000000",
+        deadline: "0",
+        token: "GTOKEN",
+        revision_count: 0,
+      })
+      .mockResolvedValueOnce({
+        client: "GCLIENT",
+        freelancer: null,
+        amount: "10000000",
+        description_hash: "hash-one",
+        status: "Open",
+        created_at: "1710000001",
+        deadline: "0",
+        token: "GTOKEN",
+        revision_count: 0,
+      });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText("New")).toBeInTheDocument());
+
+    const bookmarkButtons = screen.getAllByRole("button", { name: "Bookmark" });
+    fireEvent.click(bookmarkButtons[0]);
+    fireEvent.click(screen.getByLabelText("Favorites only"));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Job #2" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("New")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Job #1" })).not.toBeInTheDocument();
+  });
+
   it("announces result counts without duplicate spam", async () => {
     mockGetJobCount.mockResolvedValue(1);
     mockGetJob.mockResolvedValue({
@@ -163,5 +303,42 @@ describe("Home page render states", () => {
     await waitFor(() =>
       expect(screen.getByText("1 result shown")).toBeInTheDocument(),
     );
+  });
+
+  it("resets preferences and restores defaults", async () => {
+    // Set up initial preferences
+    localStorage.setItem("stellarwork:bookmarked-jobs", JSON.stringify([1, 2, 3]));
+    sessionStorage.setItem("stellarwork:jobs-view-mode", "list");
+
+    mockGetJobCount.mockResolvedValue(1);
+    mockGetJob.mockResolvedValue({
+      client: "GCLIENT",
+      freelancer: null,
+      amount: "10000000",
+      description_hash: "hash-one",
+      status: "Open",
+      created_at: "1710000001",
+      deadline: "0",
+      token: "GTOKEN",
+      revision_count: 0,
+    });
+
+    render(<HomePage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Job #1" })).toBeInTheDocument(),
+    );
+
+    // Verify preferences were loaded
+    expect(localStorage.getItem("stellarwork:bookmarked-jobs")).toBe("[1,2,3]");
+    expect(sessionStorage.getItem("stellarwork:jobs-view-mode")).toBe("list");
+
+    // Click reset button
+    fireEvent.click(screen.getByRole("button", { name: "Reset Preferences" }));
+
+    // Verify localStorage was cleared
+    expect(localStorage.getItem("stellarwork:bookmarked-jobs")).toBeNull();
+    // Verify sessionStorage was cleared
+    expect(sessionStorage.getItem("stellarwork:jobs-view-mode")).toBeNull();
   });
 });

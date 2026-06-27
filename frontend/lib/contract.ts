@@ -1,6 +1,8 @@
 "use client";
 
-import { callContract, nativeToScVal } from "@/lib/stellar";
+import { callContract, nativeToScVal, xdr } from "@/lib/stellar";
+import { requireContractId } from "@/lib/config";
+export { requireContractId };
 import type { Job } from "@/lib/types";
 
 export function hexToBytes(hex: string): Uint8Array {
@@ -16,14 +18,6 @@ export function hexToBytes(hex: string): Uint8Array {
     bytes[i / 2] = Number.parseInt(normalized.slice(i, i + 2), 16);
   }
   return bytes;
-}
-
-export function requireContractId(): string {
-  const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
-  if (!contractId) {
-    throw new Error("NEXT_PUBLIC_CONTRACT_ID is not configured.");
-  }
-  return contractId;
 }
 
 export async function postJob(
@@ -113,10 +107,10 @@ export async function raiseDispute(caller: string, jobId: string) {
   ]);
 }
 
-export async function resolveDispute(jobId: string, winner: string) {
+export async function resolveDispute(jobId: string, clientBps: number) {
   return callContract(requireContractId(), "resolve_dispute", [
     nativeToScVal(jobId, { type: "u64" }),
-    nativeToScVal(winner, { type: "address" }),
+    xdr.ScVal.scvVec([nativeToScVal(clientBps, { type: "u32" })]),
   ]);
 }
 
@@ -188,4 +182,30 @@ export async function getJobCount(): Promise<number> {
     },
   );
   return Number(response.data ?? 0);
+}
+
+export async function freelancerCancelJob(freelancer: string, jobId: string) {
+  return callContract(requireContractId(), "freelancer_cancel_job", [
+    nativeToScVal(freelancer, { type: "address" }),
+    nativeToScVal(jobId, { type: "u64" }),
+  ]);
+}
+
+export async function storeDescriptionCid(caller: string, descHashHex: string, cid: string) {
+  return callContract(requireContractId(), "store_description_cid", [
+    nativeToScVal(caller, { type: "address" }),
+    nativeToScVal(hexToBytes(descHashHex), { type: "bytes" }),
+    nativeToScVal(cid, { type: "string" }),
+  ]);
+}
+
+export async function getDescriptionCid(descHashHex: string): Promise<string | null> {
+  const response = await callContract(
+    requireContractId(),
+    "get_description_cid",
+    [nativeToScVal(hexToBytes(descHashHex), { type: "bytes" })],
+    { readOnly: true },
+  );
+  const cid = response.data as string;
+  return cid || null;
 }

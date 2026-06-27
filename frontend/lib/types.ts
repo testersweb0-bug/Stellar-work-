@@ -17,3 +17,22 @@ export interface Job {
   token: string;
   revision_count: number;
 }
+
+export type NotificationEvent =
+  | "job_accepted"
+  | "work_submitted"
+  | "work_approved"
+  | "job_cancelled"
+  | "dispute_raised"
+  | "dispute_resolved";
+
+export interface Notification {
+  id: string;
+  event: NotificationEvent;
+  jobId: number;
+  message: string;
+  timestamp: number;
+  seen: boolean;
+}
+
+export type NotificationPreferences = Record<NotificationEvent, boolean>;

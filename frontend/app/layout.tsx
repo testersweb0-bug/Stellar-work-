@@ -1,9 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { WalletProvider } from "@/lib/wallet-context";
 import { ToastProvider } from "@/components/ToastProvider";
+import { NotificationProvider } from "@/lib/notifications-context";
 import { Navigation } from "./navigation";
 import { ScrollRestorer } from "@/components/ScrollRestorer";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import CommandPalette from "@/components/CommandPalette";
 import Link from "next/link";
 import "./globals.css";
@@ -17,6 +19,12 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 export const metadata: Metadata = {
   title: "StellarWork",
@@ -35,6 +43,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
         <WalletProvider>
+          <NotificationProvider>
           <ToastProvider>
           <a
             href="#main-content"
@@ -43,10 +52,15 @@ export default function RootLayout({
             Skip to main content
           </a>
           <Navigation />
+          <CommandPalette />
           <ScrollRestorer />
           <CommandPalette />
           <main id="main-content" className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
           <footer className="mt-auto border-t border-slate-200 bg-white py-8">
+          <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-3 py-6 sm:px-4 sm:py-8">
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </main>
+          <footer className="mt-auto border-t border-slate-200 bg-white py-8 pb-[calc(2rem+env(safe-area-inset-bottom))]">
             <div className="mx-auto max-w-5xl px-4">
               <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
                 <div className="flex flex-col items-center gap-2 md:items-start">
@@ -71,6 +85,7 @@ export default function RootLayout({
             </div>
           </footer>
           </ToastProvider>
+          </NotificationProvider>
         </WalletProvider>
       </body>
     </html>

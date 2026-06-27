@@ -34,21 +34,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const idPrefix = useId();
 
-  const dismiss = useCallback((id: string) => {
-    const timer = timersRef.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timersRef.current.delete(id);
+  const dismiss = useCallback((id: string, clearTimer = true) => {
+    if (clearTimer) {
+      const timer = timersRef.current.get(id);
+      if (timer) {
+        clearTimeout(timer);
+        timersRef.current.delete(id);
+      }
     }
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
   const push = useCallback(
     (message: string, variant: ToastVariant) => {
-      const id = `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      setToasts((current) => [...current, { id, message, variant }]);
-      const timer = setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
-      timersRef.current.set(id, timer);
+      setToasts((current) => {
+        // Check for duplicate toast with same message and variant
+        const isDuplicate = current.some(
+          (toast) => toast.message === message && toast.variant === variant,
+        );
+        if (isDuplicate) {
+          return current;
+        }
+        const id = `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const timer = setTimeout(() => {
+          timersRef.current.delete(id);
+          dismiss(id, false);
+        }, AUTO_DISMISS_MS);
+        timersRef.current.set(id, timer);
+        return [...current, { id, message, variant }];
+      });
     },
     [dismiss, idPrefix],
   );

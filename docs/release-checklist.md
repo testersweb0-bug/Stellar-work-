@@ -14,11 +14,16 @@ Use this checklist before creating a release tag.
 - Run unit tests: `cd frontend && npm test`
 - Run lint checks: `cd frontend && npm run lint`
 - Build production bundle: `cd frontend && npm run build`
-- Verify `NEXT_PUBLIC_CONTRACT_ID` is set for the target environment
+- Verify `NEXT_PUBLIC_CONTRACT_ID`, `NEXT_PUBLIC_NETWORK`, and `NEXT_PUBLIC_SOROBAN_RPC` match the target environment. See `docs/environments.md`.
+
+## Communications
+
+- For planned downtime, use [maintenance-window-announcement-template.md](./maintenance-window-announcement-template.md)
+- For production incidents, follow [production-escalation.md](./production-escalation.md)
 
 ## Release
 
-- Update release notes/changelog for user-facing and contract changes
+- Update release notes/changelog for user-facing and contract changes (see [release-notes-guide.md](./release-notes-guide.md))
 - Bump version in the release metadata used by maintainers
 - Create and push a version tag (example: `v1.2.0`)
 - Open GitHub release for the tag and attach notes/artifacts as needed

@@ -71,7 +71,11 @@ Set:
 
 ```bash
 NEXT_PUBLIC_CONTRACT_ID=<CONTRACT_ID>
+NEXT_PUBLIC_NETWORK=testnet
+NEXT_PUBLIC_SOROBAN_RPC=https://soroban-testnet.stellar.org
 ```
+
+For all supported variables and defaults, see `docs/environments.md`.
 
 Start app:
 

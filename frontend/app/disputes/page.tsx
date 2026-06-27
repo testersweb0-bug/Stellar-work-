@@ -3,118 +3,20 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useModalFocusTrap } from "@/lib/modal";
 import { useWallet } from "@/lib/wallet-context";
+import { useToast } from "@/components/ToastProvider";
 import EmptyState from "@/components/EmptyState";
+import NoResultsState from "@/components/NoResultsState";
 import SectionCard from "@/components/SectionCard";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+import { toXlm } from "@/lib/format";
+import { raiseDispute as contractRaiseDispute, resolveDispute as contractResolveDispute } from "@/lib/contract";
+import {
+  loadDisputesPageData,
+  type Dispute,
+  type DisputeStatus,
+  type EligibleJob,
+} from "@/lib/disputes-loader";
 
 type Role = "client" | "freelancer" | "admin";
-
-type DisputeStatus =
-  | "Active"
-  | "Resolved"
-  | "PendingEvidence"
-  | "UnderReview"
-  | "Closed";
-
-interface Dispute {
-  id: string;
-  jobId: string;
-  jobTitle: string;
-  client: string;
-  freelancer: string;
-  amount: number;
-  raisedBy: "client" | "freelancer";
-  raisedAt: string;
-  status: DisputeStatus;
-  reason: string;
-  evidence?: string;
-  resolution?: {
-    resolvedAt: string;
-    clientShare: number;
-    freelancerShare: number;
-    note: string;
-  };
-}
-
-interface EligibleJob {
-  id: string;
-  title: string;
-  counterparty: string;
-  amount: number;
-}
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const MOCK_DISPUTES: Dispute[] = [
-  {
-    id: "D-001",
-    jobId: "J-104",
-    jobTitle: "Smart Contract Audit — DeFi Protocol",
-    client: "BlockVentures LLC",
-    freelancer: "0xDev.eth",
-    amount: 4200,
-    raisedBy: "client",
-    raisedAt: "2025-04-18T09:22:00Z",
-    status: "UnderReview",
-    reason: "Delivered audit missed three critical vulnerabilities found by a third party.",
-    evidence: "Audit report diff, third-party findings attached.",
-  },
-  {
-    id: "D-002",
-    jobId: "J-098",
-    jobTitle: "NFT Marketplace Frontend",
-    client: "ArtChain Studio",
-    freelancer: "pixel.labs",
-    amount: 2800,
-    raisedBy: "freelancer",
-    raisedAt: "2025-04-12T14:05:00Z",
-    status: "Active",
-    reason: "Client has not approved final deliverable despite meeting all specs.",
-    evidence: "Spec doc signed off, delivery screenshots included.",
-  },
-  {
-    id: "D-003",
-    jobId: "J-091",
-    jobTitle: "Tokenomics Whitepaper",
-    client: "NovaCoin Foundation",
-    freelancer: "dr.tokenomics",
-    amount: 1500,
-    raisedBy: "client",
-    raisedAt: "2025-03-30T11:40:00Z",
-    status: "Resolved",
-    reason: "Whitepaper contained significant factual errors requiring full revision.",
-    resolution: {
-      resolvedAt: "2025-04-08T16:20:00Z",
-      clientShare: 40,
-      freelancerShare: 60,
-      note: "Partial refund agreed — work was largely complete but needed corrections.",
-    },
-  },
-  {
-    id: "D-004",
-    jobId: "J-087",
-    jobTitle: "DAO Governance Module",
-    client: "Collective3",
-    freelancer: "rustchain.dev",
-    amount: 7500,
-    raisedBy: "freelancer",
-    raisedAt: "2025-03-22T08:15:00Z",
-    status: "Closed",
-    reason: "Payment withheld after scope expansion was verbally agreed.",
-    resolution: {
-      resolvedAt: "2025-04-01T10:00:00Z",
-      clientShare: 10,
-      freelancerShare: 90,
-      note: "Evidence of scope expansion accepted. Freelancer awarded full revised amount.",
-    },
-  },
-];
-
-const MOCK_ELIGIBLE_JOBS: EligibleJob[] = [
-  { id: "J-112", title: "Solidity Gas Optimisation", counterparty: "GasHawks Inc.", amount: 960 },
-  { id: "J-108", title: "Web3 Dashboard Redesign", counterparty: "UX3 Studio", amount: 1800 },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,8 +32,8 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function fmtUSD(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+function fmtAmount(n: number): string {
+  return `${toXlm(n)} XLM`;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -148,7 +50,11 @@ function StatusBadge({ status }: { status: DisputeStatus }) {
 
 function Spinner() {
   return (
-    <div className="flex items-center justify-center py-16">
+    <div
+      role="status"
+      aria-label="Loading disputes"
+      className="flex items-center justify-center py-16"
+    >
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
     </div>
   );
@@ -237,7 +143,7 @@ function RaiseDisputeModal({
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
             >
               {jobs.map(j => (
-                <option key={j.id} value={j.id}>{j.title} — {fmtUSD(j.amount)}</option>
+                <option key={j.id} value={j.id}>{j.title} — {fmtAmount(j.amount)}</option>
               ))}
             </select>
           </div>
@@ -373,7 +279,7 @@ function ResolveModal({
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-medium text-slate-700">Fund Split</label>
-              <span className="text-xs text-slate-500">Total: {fmtUSD(dispute.amount)}</span>
+              <span className="text-xs text-slate-500">Total: {fmtAmount(dispute.amount)}</span>
             </div>
 
             {/* Split bar */}
@@ -408,12 +314,12 @@ function ResolveModal({
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="rounded-lg bg-blue-50 px-3 py-2 ring-1 ring-blue-100">
                 <p className="text-[10px] text-blue-500 font-medium uppercase tracking-wide">Client</p>
-                <p className="text-sm font-semibold text-blue-700 mt-0.5">{fmtUSD(dispute.amount * clientShare / 100)}</p>
+                <p className="text-sm font-semibold text-blue-700 mt-0.5">{fmtAmount(Math.floor(dispute.amount * clientShare / 100))}</p>
                 <p className="text-[10px] text-blue-400">{dispute.client}</p>
               </div>
               <div className="rounded-lg bg-violet-50 px-3 py-2 ring-1 ring-violet-100">
                 <p className="text-[10px] text-violet-500 font-medium uppercase tracking-wide">Freelancer</p>
-                <p className="text-sm font-semibold text-violet-700 mt-0.5">{fmtUSD(dispute.amount * freelancerShare / 100)}</p>
+                <p className="text-sm font-semibold text-violet-700 mt-0.5">{fmtAmount(Math.floor(dispute.amount * freelancerShare / 100))}</p>
                 <p className="text-[10px] text-violet-400">{dispute.freelancer}</p>
               </div>
             </div>
@@ -492,7 +398,7 @@ function DisputeCard({
         </div>
 
         <div className="text-right shrink-0">
-          <p className="text-base font-bold text-slate-900">{fmtUSD(dispute.amount)}</p>
+          <p className="text-base font-bold text-slate-900">{fmtAmount(dispute.amount)}</p>
           <p className="text-xs text-slate-400">{fmtDate(dispute.raisedAt)}</p>
         </div>
       </div>
@@ -518,13 +424,13 @@ function DisputeCard({
               <div className="flex gap-3">
                 <div>
                   <p className="text-[10px] text-emerald-500">Client received</p>
-                  <p className="text-sm font-bold text-emerald-700">{fmtUSD(dispute.amount * dispute.resolution.clientShare / 100)}</p>
+                  <p className="text-sm font-bold text-emerald-700">{fmtAmount(Math.floor(dispute.amount * dispute.resolution.clientShare / 100))}</p>
                   <p className="text-[10px] text-emerald-400">{dispute.resolution.clientShare}%</p>
                 </div>
                 <div className="w-px bg-emerald-200" />
                 <div>
                   <p className="text-[10px] text-emerald-500">Freelancer received</p>
-                  <p className="text-sm font-bold text-emerald-700">{fmtUSD(dispute.amount * dispute.resolution.freelancerShare / 100)}</p>
+                  <p className="text-sm font-bold text-emerald-700">{fmtAmount(Math.floor(dispute.amount * dispute.resolution.freelancerShare / 100))}</p>
                   <p className="text-[10px] text-emerald-400">{dispute.resolution.freelancerShare}%</p>
                 </div>
               </div>
@@ -569,7 +475,7 @@ export default function DisputesPage() {
 
   const [showRaiseModal, setShowRaiseModal] = useState(false);
   const [resolveTarget, setResolveTarget] = useState<Dispute | null>(null);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const { showSuccess, showError } = useToast();
 
   // Sync role with wallet/admin status
   useEffect(() => {
@@ -586,34 +492,31 @@ export default function DisputesPage() {
     }
   }, [wallet]);
 
-  // Simulate data fetch
-  useEffect(() => {
+  const loadDisputes = useCallback(async () => {
     if (!wallet) {
+      setDisputes([]);
+      setEligibleJobs([]);
       setLoading(false);
+      setError("");
       return;
     }
 
     setLoading(true);
-    const t = setTimeout(() => {
-      try {
-        setError("");
-        setDisputes(MOCK_DISPUTES);
-        setEligibleJobs(MOCK_ELIGIBLE_JOBS);
-        setLoading(false);
-      } catch {
-        setError("Failed to load disputes. Please try again.");
-        setLoading(false);
-      }
-    }, 800);
-    return () => clearTimeout(t);
-  }, [role, wallet]);
+    setError("");
+    try {
+      const data = await loadDisputesPageData(wallet);
+      setDisputes(data.disputes);
+      setEligibleJobs(data.eligibleJobs);
+    } catch {
+      setError("Failed to load disputes. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet]);
 
-  // Toast auto-dismiss
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
+    void loadDisputes();
+  }, [loadDisputes, role]);
 
   const filteredDisputes = disputes.filter(d => {
     if (filter === "active") return ["Active", "UnderReview", "PendingEvidence"].includes(d.status);
@@ -622,46 +525,55 @@ export default function DisputesPage() {
   });
 
   async function handleRaiseDispute(jobId: string, reason: string, evidence: string) {
-    // Simulate SC-1 smart contract call
-    await new Promise(res => setTimeout(res, 1200));
-    const job = eligibleJobs.find(j => j.id === jobId)!;
-    const newDispute: Dispute = {
-      id: `D-00${disputes.length + 1}`,
-      jobId,
-      jobTitle: job.title,
-      client: role === "client" ? "You" : job.counterparty,
-      freelancer: role === "freelancer" ? "You" : job.counterparty,
-      amount: job.amount,
-      raisedBy: role as "client" | "freelancer",
-      raisedAt: new Date().toISOString(),
-      status: "Active",
-      reason,
-      evidence,
-    };
-    setDisputes(prev => [newDispute, ...prev]);
-    setToast({ msg: "Dispute raised. Funds held in escrow.", type: "success" });
+    if (!wallet) return;
+    try {
+      await contractRaiseDispute(wallet, jobId);
+      const job = eligibleJobs.find(j => j.id === jobId)!;
+      const newDispute: Dispute = {
+        id: `D-${String(disputes.length + 1).padStart(3, "0")}`,
+        jobId,
+        jobTitle: job.title,
+        client: role === "client" ? "You" : job.counterparty,
+        freelancer: role === "freelancer" ? "You" : job.counterparty,
+        amount: job.amount,
+        raisedBy: role as "client" | "freelancer",
+        raisedAt: new Date().toISOString(),
+        status: "Active",
+        reason,
+        evidence,
+      };
+      setDisputes(prev => [newDispute, ...prev]);
+      showSuccess("Dispute raised. Funds held in escrow.");
+    } catch {
+      showError("Failed to raise dispute. Please try again.");
+    }
   }
 
   async function handleResolve(id: string, clientShare: number, note: string) {
-    // Simulate SC-2 smart contract call
-    await new Promise(res => setTimeout(res, 1200));
-    setDisputes(prev =>
-      prev.map(d =>
-        d.id === id
-          ? {
-              ...d,
-              status: "Resolved" as DisputeStatus,
-              resolution: {
-                resolvedAt: new Date().toISOString(),
-                clientShare,
-                freelancerShare: 100 - clientShare,
-                note,
-              },
-            }
-          : d
-      )
-    );
-    setToast({ msg: "Dispute resolved and funds disbursed.", type: "success" });
+    try {
+      const jobId = disputes.find(d => d.id === id)?.jobId;
+      if (!jobId) return;
+      await contractResolveDispute(jobId, clientShare);
+      setDisputes(prev =>
+        prev.map(d =>
+          d.id === id
+            ? {
+                ...d,
+                status: "Resolved" as DisputeStatus,
+                resolution: {
+                  resolvedAt: new Date().toISOString(),
+                  clientShare,
+                  freelancerShare: 100 - clientShare,
+                  note,
+                },
+              }
+            : d
+        )
+      );
+      showSuccess("Dispute resolved and funds disbursed.");
+    } catch {
+      showError("Failed to resolve dispute. Please try again.");
+    }
   }
 
   const activeCount = disputes.filter(d => ["Active", "UnderReview", "PendingEvidence"].includes(d.status)).length;
@@ -689,20 +601,6 @@ export default function DisputesPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`fixed top-4 right-4 z-[100] flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ring-1 transition-all ${
-            toast.type === "success"
-              ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-              : "bg-red-50 text-red-800 ring-red-200"
-          }`}
-        >
-          <span>{toast.type === "success" ? "✓" : "✕"}</span>
-          {toast.msg}
-        </div>
-      )}
-
       <div className="mx-auto max-w-3xl px-4 py-8">
         {/* Page header */}
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
@@ -719,10 +617,7 @@ export default function DisputesPage() {
               {(["client", "freelancer", "admin"] as Role[]).map(r => (
                 <button
                   key={r}
-                  onClick={() => {
-                    setLoading(true);
-                    setRole(r);
-                  }}
+                  onClick={() => setRole(r)}
                   className={`rounded-md px-3 py-1.5 font-medium capitalize transition-colors ${
                     role === r ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-800"
                   }`}
@@ -775,20 +670,32 @@ export default function DisputesPage() {
         ) : error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}{" "}
-            <button className="underline" onClick={() => setLoading(true)}>Retry</button>
+            <button type="button" className="underline" onClick={() => void loadDisputes()}>
+              Retry
+            </button>
           </div>
         ) : filteredDisputes.length === 0 ? (
-          <EmptyState
-            title="No disputes found"
-            description={
-              filter === "active"
-                ? "No active disputes yet."
-                : filter === "resolved"
-                  ? "No resolved disputes yet."
-                  : "No disputes yet."
-            }
-            className="border-slate-200 bg-slate-50"
-          />
+          filter !== "all" && disputes.length > 0 ? (
+            <NoResultsState
+              title="No disputes match this filter"
+              description="Try a different tab or clear the filter to see every dispute."
+              actionLabel="Show all disputes"
+              onAction={() => setFilter("all")}
+              className="border-slate-200 bg-slate-50"
+            />
+          ) : (
+            <EmptyState
+              title="No disputes found"
+              description={
+                filter === "active"
+                  ? "No active disputes yet."
+                  : filter === "resolved"
+                    ? "No resolved disputes yet."
+                    : "No disputes yet."
+              }
+              className="border-slate-200 bg-slate-50"
+            />
+          )
         ) : (
           <div className="space-y-3">
             {filteredDisputes.map(d => (

@@ -1,0 +1,65 @@
+name: Stale Issue Automation
+
+# Stale Issue Policy:
+# - Issues are marked as stale after 30 days of inactivity
+# - Stale issues are closed after 7 additional days (37 days total)
+# - Issues with exempt labels are never marked stale
+# - Comments remove stale status and reset the timer
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark and close stale issues
+        uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          
+          # Stale timing configuration
+          days-before-stale: 30
+          days-before-close: 7
+          
+          # Exempt labels - issues with these labels are never marked stale
+          exempt-issue-labels: |
+            bug
+            security
+            good first issue
+            help wanted
+            pinned
+            in-progress
+            blocked
+          
+          # Stale message
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has been inactive for 30 days.
+            
+            If this issue is still relevant, please:
+            - Leave a comment to remove the stale status
+            - Update the issue with new information
+            - Close the issue if it's no longer needed
+            
+            If no activity occurs within 7 days, this issue will be automatically closed.
+          
+          # Close message
+          close-issue-message: |
+            This issue has been automatically closed due to inactivity for 37 days.
+            
+            If this issue is still relevant, feel free to reopen it with updated information.
+          
+          # Label configuration
+          stale-issue-label: 'stale'
+          
+          # Only apply to issues, not pull requests
+          operations-per-run: 100
+          
+          # Debug mode (set to true for testing)
+          debug-only: false

@@ -1,6 +1,7 @@
 "use client";
 
-import { getDescPayloadMax, postJob } from "@/lib/contract";
+import { getDescPayloadMax, postJob, storeDescriptionCid } from "@/lib/contract";
+import { uploadToIpfs } from "@/lib/ipfs-service";
 import ErrorBanner from "@/components/ErrorBanner";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import { useWallet } from "@/lib/wallet-context";
@@ -134,14 +135,22 @@ export default function PostJobPage() {
               : "0";
 
             localStorage.setItem(`job-desc:${hashHex}`, trimmedDescription);
+            const cid = await uploadToIpfs(trimmedDescription);
             const result = await postJob(
               wallet,
-              amountStroops,
+              amountStroops!,
               hashHex,
               descriptionPayloadLen,
               deadlineUnix,
-              tokenAddress,
+              tokenAddress.trim(),
             );
+            if (cid && !cid.startsWith("fallback:")) {
+              try {
+                await storeDescriptionCid(wallet, hashHex, cid);
+              } catch {
+                // CID storage is best-effort; description is still in localStorage
+              }
+            }
             if (result.hash) {
               setTxHash(result.hash);
             }
@@ -188,7 +197,7 @@ export default function PostJobPage() {
           <input
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
             type="number"
-            min="0"
+            min="0.0000001"
             step="0.0000001"
             value={amount}
             onChange={(e) => {
@@ -196,9 +205,12 @@ export default function PostJobPage() {
               setFieldErrors((current) => ({ ...current, amount: undefined }));
             }}
             aria-invalid={Boolean(fieldErrors.amount)}
-            aria-describedby={fieldErrors.amount ? "post-job-amount-error" : undefined}
+            aria-describedby={fieldErrors.amount ? "post-job-amount-error" : "post-job-amount-helper"}
             required
           />
+          <p id="post-job-amount-helper" className="mt-1 text-xs text-slate-500">
+            Enter amount in XLM with up to 7 decimal places (e.g., 10.5 or 0.0000001)
+          </p>
           {fieldErrors.amount && (
             <p id="post-job-amount-error" className="mt-1 text-xs text-red-600">
               {fieldErrors.amount}

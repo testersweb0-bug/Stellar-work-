@@ -1,30 +1,13 @@
 "use client";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import StatusPill from "@/components/StatusPill";
 import { getJob, getJobCount } from "@/lib/contract";
 import { toXlm } from "@/lib/format";
-import type { Job, JobStatus } from "@/lib/types";
+import type { Job } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-
-const STATUS_LABELS: Record<JobStatus, string> = {
-  Open: "Open",
-  InProgress: "In Progress",
-  SubmittedForReview: "Submitted for Review",
-  Completed: "Completed",
-  Cancelled: "Cancelled",
-  Disputed: "Disputed",
-};
-
-const STATUS_COLORS: Record<JobStatus, string> = {
-  Open: "bg-blue-100 text-blue-800",
-  InProgress: "bg-yellow-100 text-yellow-800",
-  SubmittedForReview: "bg-purple-100 text-purple-800",
-  Completed: "bg-green-100 text-green-800",
-  Cancelled: "bg-red-100 text-red-800",
-  Disputed: "bg-orange-100 text-orange-800",
-};
 
 function isValidStellarAddress(address: string): boolean {
   return /^G[A-Z2-7]{55}$/.test(address);
@@ -95,11 +78,19 @@ export default function ProfilePageClient({ address }: { address: string }) {
   if (!addressValid) {
     return (
       <section className="mx-auto max-w-3xl space-y-6">
-        <h1 className="text-2xl font-semibold">Profile</h1>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-blue-600 hover:underline">
+            Back to Home
+          </Link>
+          <h1 className="text-2xl font-semibold">Profile</h1>
+        </div>
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
           <p className="font-medium text-red-800">Invalid Address</p>
           <p className="mt-1 text-sm text-red-600">
             &ldquo;{address}&rdquo; is not a valid Stellar address.
+          </p>
+          <p className="mt-3 text-xs text-red-600">
+            Stellar addresses start with &ldquo;G&rdquo; and are 56 characters long.
           </p>
         </div>
       </section>
@@ -109,11 +100,16 @@ export default function ProfilePageClient({ address }: { address: string }) {
   if (!wallet) {
     return (
       <section className="mx-auto max-w-3xl space-y-6">
-        <h1 className="text-2xl font-semibold">Profile</h1>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-blue-600 hover:underline">
+            Back to Home
+          </Link>
+          <h1 className="text-2xl font-semibold">Profile</h1>
+        </div>
         <div className="rounded-lg border border-slate-200 bg-white p-8 text-center">
           <p className="text-slate-600">Connect your wallet to view this profile.</p>
           <button
-            className="mt-4 rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white"
+            className="mt-4 rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
             onClick={async () => {
               try {
                 await connectWallet();
@@ -131,13 +127,43 @@ export default function ProfilePageClient({ address }: { address: string }) {
 
   return (
     <section className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Profile</h1>
-        <p className="mt-1 font-mono text-sm text-slate-500">{address}</p>
+      <div className="flex items-center gap-4">
+        <Link href="/" className="text-sm text-blue-600 hover:underline">
+          Back to Home
+        </Link>
+        <div>
+          <h1 className="text-2xl font-semibold">Profile</h1>
+          <p className="mt-1 font-mono text-sm text-slate-500">{address}</p>
+        </div>
       </div>
 
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-      {loading && <p className="text-sm text-slate-600">Loading job history...</p>}
+      {error && (
+        <ErrorBanner
+          message={error}
+          onDismiss={() => setError(null)}
+          onRetry={() => void fetchJobs()}
+        />
+      )}
+      {loading && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="animate-pulse rounded-lg border border-slate-200 bg-white p-4">
+                <div className="h-8 w-16 rounded bg-slate-200 mx-auto" />
+                <div className="mt-2 h-3 w-20 rounded bg-slate-200 mx-auto" />
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 animate-pulse">
+            <div className="h-6 w-28 rounded bg-slate-200" />
+            <div className="mt-3 space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-10 w-full rounded bg-slate-200" />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!loading && (
         <>
@@ -201,11 +227,7 @@ export default function ProfilePageClient({ address }: { address: string }) {
                         </th>
                         <td className="py-2 pr-4 capitalize">{role}</td>
                         <td className="py-2 pr-4">
-                          <span
-                            className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[job.status]}`}
-                          >
-                            {STATUS_LABELS[job.status]}
-                          </span>
+                          <StatusPill status={job.status} />
                         </td>
                         <td className="py-2 pr-4 text-right">
                           <span className="inline-flex min-w-0 items-baseline justify-end gap-1">

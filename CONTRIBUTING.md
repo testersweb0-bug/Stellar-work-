@@ -2,6 +2,8 @@
 
 Thanks for contributing.
 
+New contributors: start with the [onboarding checklist](docs/contributor-onboarding-checklist.md) and the [docs index](docs/README.md).
+
 ## Branching
 
 - Fork and create branches as `feature/<issue-number>-<short-description>`.
@@ -75,3 +77,29 @@ We use labels to categorize issues and pull requests. Please use them accordingl
 | `frontend` | Related to the Next.js web application. | Fix navigation alignment |
 | `maintenance` | Chore, refactoring, or dependency updates. | Update next.js to latest |
 | `invalid` | This doesn't seem right or is out of scope. | Feature request for unrelated app |
+
+## Stale Issue Policy
+
+To keep our issue tracker manageable, we use automated stale issue management:
+
+### Timing
+- Issues are marked as **stale** after 30 days of inactivity
+- Stale issues are **closed** after 7 additional days (37 days total from last activity)
+
+### Exempt Labels
+The following labels exempt issues from being marked stale:
+- `bug` - Bugs may need extended investigation
+- `security` - Security issues require careful handling
+- `good first issue` - Reserved for newcomers
+- `help wanted` - Issues seeking community contribution
+- `pinned` - Important issues kept visible
+- `in-progress` - Currently being worked on
+- `blocked` - Waiting on dependencies or external factors
+
+### Removing Stale Status
+If an issue is marked as stale, you can remove the stale status by:
+- Leaving a comment on the issue
+- Updating the issue with new information
+- Closing the issue if it's no longer relevant
+
+This resets the inactivity timer.

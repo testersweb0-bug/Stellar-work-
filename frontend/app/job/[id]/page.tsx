@@ -1,22 +1,27 @@
 "use client";
 
 import CancelJobConfirmModal from "@/components/CancelJobConfirmModal";
+import InfoTooltip from "@/components/InfoTooltip";
 import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/components/ToastProvider";
-import { acceptJob, approveWork, cancelJob, getJob, submitWork } from "@/lib/contract";
-import { toXlm } from "@/lib/format";
+import StatusPill from "@/components/StatusPill";
+import { useNotifications } from "@/lib/notifications-context";
+import { acceptJob, approveWork, cancelJob, freelancerCancelJob, getDescriptionCid, getJob, submitWork } from "@/lib/contract";
+import { fetchFromIpfs } from "@/lib/ipfs-service";
+import { formatDeadline, toXlm } from "@/lib/format";
 import { getExplorerTxUrl } from "@/lib/stellar";
 import type { Job } from "@/lib/types";
 import { useWallet } from "@/lib/wallet-context";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { wallet } = useWallet();
   const { showSuccess, showError } = useToast();
+  const { addNotification } = useNotifications();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +30,8 @@ export default function JobDetailPage() {
   const [latestTxHash, setLatestTxHash] = useState<string | null>(null);
   const [invalidId, setInvalidId] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [description, setDescription] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const numericId = Number(id);
   const isIdValid = !isNaN(numericId) && numericId > 0 && Number.isInteger(numericId);
@@ -37,10 +44,28 @@ export default function JobDetailPage() {
     }
     setFetching(true);
     setError(null);
+    setDescription(null);
     try {
       const data = await getJob(id);
       setJob(data);
-      if (!data) {
+      if (data) {
+        const hash = data.description_hash;
+        const stored = localStorage.getItem(`job-desc:${hash}`);
+        if (stored) {
+          setDescription(stored);
+        } else {
+          try {
+            const cid = await getDescriptionCid(hash);
+            if (cid) {
+              const text = await fetchFromIpfs(cid);
+              setDescription(text);
+              localStorage.setItem(`job-desc:${hash}`, text);
+            }
+          } catch {
+            setDescription(null);
+          }
+        }
+      } else {
         setError("Job not found.");
       }
     } catch (e) {
@@ -63,23 +88,27 @@ export default function JobDetailPage() {
     }
   }, [wallet]);
 
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const isClient = wallet && job && wallet === job.client;
   const isFreelancer = wallet && job && wallet === job.freelancer;
   const canAccept = Boolean(job && job.status === "Open");
   const canSubmit = Boolean(isFreelancer && job?.status === "InProgress");
   const canApprove = Boolean(isClient && job?.status === "SubmittedForReview");
   const canCancel = Boolean(isClient && job?.status === "Open");
-  const hasPrimaryActions = canAccept || canSubmit || canApprove || canCancel;
-
-  function getDescription(hash: string): string {
-    const stored = localStorage.getItem(`job-desc:${hash}`);
-    if (stored) return stored;
-    return "Description unavailable (posted from another device)";
-  }
+  const canFreelancerCancel = Boolean(isFreelancer && job?.status === "InProgress");
+  const hasPrimaryActions = canAccept || canSubmit || canApprove || canCancel || canFreelancerCancel;
 
   async function handleAction(
     action: () => Promise<{ hash?: string }>,
     successMessage = "Action completed successfully.",
+    notification?: { event: import("@/lib/types").NotificationEvent; message: string },
   ) {
     if (loading) return;
     setError(null);
@@ -94,6 +123,9 @@ export default function JobDetailPage() {
       const result = await action();
       if (result.hash) {
         setLatestTxHash(result.hash);
+      }
+      if (notification) {
+        addNotification(notification.event, numericId, notification.message);
       }
       await load();
       showSuccess(successMessage);
@@ -111,15 +143,25 @@ export default function JobDetailPage() {
       showError("Connect your wallet to run this action.");
       return;
     }
-    await handleAction(() => cancelJob(wallet, id), "Job cancelled and funds refunded.");
+    await handleAction(
+      () => cancelJob(wallet, id),
+      "Job cancelled and funds refunded.",
+      { event: "job_cancelled", message: `Job #${id} was cancelled and funds refunded.` },
+    );
     setShowCancelConfirm(false);
   }
 
   async function copyToClipboard(text: string) {
     try {
       await navigator.clipboard.writeText(text);
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimeoutRef.current = null;
+      }, 2000);
     } catch (err) {
       console.error("Failed to copy!", err);
     }
@@ -154,16 +196,29 @@ export default function JobDetailPage() {
     return (
       <section className="space-y-4">
         <h1 className="text-2xl font-semibold">Job #{id}</h1>
-        <p className="text-sm text-slate-700">{error ?? "Job not found."}</p>
-        <Link href="/" className="text-sm text-blue-600 hover:underline">
-          Back to Home
-        </Link>
+        <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm">
+          <p className="text-slate-700">{error ?? "Job not found."}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {error && error !== "Job not found." && (
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="rounded-md bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-700"
+              >
+                Retry
+              </button>
+            )}
+            <Link href="/" className="rounded-md border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-50">
+              Back to Home
+            </Link>
+          </div>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="space-y-6 pb-28 sm:pb-32">
+    <section className="space-y-6 pb-6 sm:pb-6">
       <div className="flex items-center gap-4">
         <Link href="/" className="text-sm text-blue-600 hover:underline">
           Back
@@ -192,7 +247,7 @@ export default function JobDetailPage() {
 
       <article className="space-y-2 rounded-lg border border-slate-200 bg-white p-5 text-sm">
         <p>
-          <strong>Status:</strong> {job.status}
+          <strong>Status:</strong> <StatusPill status={job.status} />
         </p>
         <p>
           <strong>Client:</strong> {job.client}
@@ -204,11 +259,25 @@ export default function JobDetailPage() {
           <strong>Amount:</strong> {toXlm(job.amount)} XLM
         </p>
         <p>
-          <strong>Description:</strong> {getDescription(job.description_hash)}
+          <strong>Token:</strong>{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
+            {job.token ? `${job.token.slice(0, 8)}...${job.token.slice(-4)}` : "N/A"}
+          </code>
         </p>
-        <div className="flex items-center gap-2">
-          <p>
-            <strong>Description hash:</strong>{" "}
+        <p>
+          <strong>Description:</strong>{" "}
+          {description ?? localStorage.getItem(`job-desc:${job.description_hash}`) ?? "Description unavailable (posted from another device)"}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="flex items-center gap-2">
+            <strong className="inline-flex items-center gap-2">
+              Description hash
+              <InfoTooltip
+                label="Description hash help"
+                content="This hash identifies the stored job description and is useful when comparing records across devices."
+              />
+              :
+            </strong>
             <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
               {job.description_hash}
             </code>
@@ -223,7 +292,11 @@ export default function JobDetailPage() {
         </div>
         <p>
           <strong>Deadline:</strong>{" "}
-          {job.deadline === "0" ? "No deadline" : new Date(Number(job.deadline) * 1000).toLocaleString()}
+          {(() => {
+            const deadline = formatDeadline(job.deadline);
+            if (!deadline) return "No deadline";
+            return `${deadline.isPast ? "Past due" : deadline.relative} • ${deadline.exact}`;
+          })()}
         </p>
 
         {!wallet && (
@@ -234,59 +307,93 @@ export default function JobDetailPage() {
       </article>
 
       {hasPrimaryActions && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] backdrop-blur-sm">
-          <div className="mx-auto flex w-full max-w-4xl flex-wrap gap-2 sm:justify-end">
-            {canAccept && (
-              <button
-                className="min-w-0 flex-1 rounded-md border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 sm:flex-none sm:max-w-48"
-                onClick={() => {
-                  if (!wallet) {
-                    return;
-                  }
-                  void handleAction(() => acceptJob(wallet, id));
-                }}
-                disabled={!wallet || loading}
-                title={!wallet ? "Connect your wallet to accept this job." : undefined}
-                aria-busy={loading}
-              >
-                <span className="block truncate">{loading ? "Processing..." : "Accept Job"}</span>
-              </button>
-            )}
+        <>
+          {/* Spacer to prevent content from being hidden behind sticky footer on mobile */}
+          <div className="h-20 sm:hidden" aria-hidden="true" />
+          
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-6px_24px_rgba(15,23,42,0.08)] backdrop-blur-sm sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:pb-0 sm:shadow-none sm:backdrop-blur-none">
+            <div className="mx-auto flex w-full max-w-4xl flex-wrap gap-2 sm:justify-end">
+              {canAccept && (
+                <button
+                  className="min-w-0 flex-1 rounded-md border border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-500 sm:flex-none sm:max-w-48 sm:py-2"
+                  onClick={() => {
+                    if (!wallet) {
+                      return;
+                    }
+                    void handleAction(
+                      () => acceptJob(wallet, id),
+                      "Job accepted successfully.",
+                      { event: "job_accepted", message: `You accepted Job #${id}.` },
+                    );
+                  }}
+                  disabled={!wallet || loading}
+                  title={!wallet ? "Connect your wallet to accept this job." : undefined}
+                  aria-busy={loading}
+                >
+                  <span className="block truncate">{loading ? "Processing..." : "Accept Job"}</span>
+                </button>
+              )}
 
-            {canSubmit && (
-              <button
-                className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48"
-                onClick={() => handleAction(() => submitWork(wallet!, id))}
-                disabled={loading}
-                aria-busy={loading}
-              >
-                <span className="block truncate">{loading ? "Processing..." : "Submit Work"}</span>
-              </button>
-            )}
+              {canSubmit && (
+                <button
+                  className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
+                  onClick={() => handleAction(
+                    () => submitWork(wallet!, id),
+                    "Work submitted for review.",
+                    { event: "work_submitted", message: `Work for Job #${id} was submitted for review.` },
+                  )}
+                  disabled={loading}
+                  aria-busy={loading}
+                >
+                  <span className="block truncate">{loading ? "Processing..." : "Submit Work"}</span>
+                </button>
+              )}
 
-            {canApprove && (
-              <button
-                className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48"
-                onClick={() => handleAction(() => approveWork(wallet!, id))}
-                disabled={loading}
-                aria-busy={loading}
-              >
-                <span className="block truncate">{loading ? "Processing..." : "Approve Work"}</span>
-              </button>
-            )}
+              {canApprove && (
+                <button
+                  className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
+                  onClick={() => handleAction(
+                    () => approveWork(wallet!, id),
+                    "Work approved and payment released.",
+                    { event: "work_approved", message: `Work for Job #${id} was approved and payment released.` },
+                  )}
+                  disabled={loading}
+                  aria-busy={loading}
+                >
+                  <span className="block truncate">{loading ? "Processing..." : "Approve Work"}</span>
+                </button>
+              )}
 
-            {canCancel && (
-              <button
-                className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48"
-                onClick={() => setShowCancelConfirm(true)}
-                disabled={loading}
-                aria-haspopup="dialog"
-              >
-                <span className="block truncate">Cancel Job</span>
-              </button>
-            )}
+              {canCancel && (
+                <button
+                  className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
+                  onClick={() => setShowCancelConfirm(true)}
+                  disabled={loading}
+                  aria-haspopup="dialog"
+                >
+                  <span className="block truncate">Cancel Job</span>
+                </button>
+              )}
+
+              {canFreelancerCancel && (
+                <button
+                  className="min-w-0 flex-1 rounded-md border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 sm:flex-none sm:max-w-48 sm:py-2"
+                  onClick={() => {
+                    if (!wallet) return;
+                    void handleAction(
+                      () => freelancerCancelJob(wallet, id),
+                      "Job cancelled. Full refund returned to client.",
+                    );
+                  }}
+                  disabled={loading}
+                  aria-busy={loading}
+                >
+                  <span className="block truncate">{loading ? "Processing..." : "Cancel as Freelancer"}</span>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {showCancelConfirm && (
